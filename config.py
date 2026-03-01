@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 VERSION = "1.0.1"
-TOKEN = os.getenv("BOT_TOKEN", "8772757125:AAH5kJ6CGcUcW46kW5_OLhyxLpwrAZbDgXA")
+TOKEN = os.getenv("BOT_TOKEN", "8507895212:AAG2zy57jMp0hEXPCUJtEFt7jAdv9XmTakU")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "Clik_TohnBot")
 REFERRAL_BOT_USERNAME = os.getenv("REFERRAL_BOT_USERNAME", "imopesbot")
 OWNER_ID = int(os.getenv("OWNER_ID", "8507895212"))
