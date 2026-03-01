@@ -11,7 +11,10 @@ TOKEN = os.getenv("BOT_TOKEN", "8507895212:AAG2zy57jMp0hEXPCUJtEFt7jAdv9XmTakU")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "Clik_TohnBot")
 REFERRAL_BOT_USERNAME = os.getenv("REFERRAL_BOT_USERNAME", "imopesbot")
 OWNER_ID = int(os.getenv("OWNER_ID", "8507895212"))
+
+# Путь к файлу БД: на Railway Volume — /data/clicktohn.db
 DB_NAME = os.getenv("DB_NAME", "clicktohn.db")
+SEED_DB = os.path.join(os.path.dirname(__file__), "clicktohn.db")
 
 # ━━━━━━━━━━━━━━━━━━━ Приз (подписка на канал) ━━━━━━━━━━━━━━━━━━━
 PRIZE_CHANNEL_ID = -1003607421291

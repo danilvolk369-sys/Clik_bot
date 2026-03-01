@@ -3,6 +3,8 @@
 # ======================================================
 import asyncio
 import logging
+import os
+import shutil
 from datetime import datetime as _dtm
 
 from aiogram import Bot, Dispatcher
@@ -10,7 +12,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import TOKEN, VERSION, OWNER_ID, NFT_RARITIES, NFT_RARITY_EMOJI
+from config import TOKEN, VERSION, OWNER_ID, NFT_RARITIES, NFT_RARITY_EMOJI, DB_NAME, SEED_DB
 from database import (
     init_db, get_expired_active_events, finish_event_with_winner,
     get_event_participants, create_nft_template, grant_nft_to_user,
@@ -293,8 +295,26 @@ async def auction_checker(bot: Bot):
         await asyncio.sleep(5)
 
 
+def _ensure_db():
+    """Если DB_NAME не существует — копируем seed-БД из репозитория."""
+    if not os.path.exists(DB_NAME):
+        db_dir = os.path.dirname(DB_NAME)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+        if os.path.exists(SEED_DB):
+            shutil.copy2(SEED_DB, DB_NAME)
+            logger.info("Скопирована seed-БД %s → %s", SEED_DB, DB_NAME)
+        else:
+            logger.info("Seed-БД не найдена, будет создана новая")
+    else:
+        logger.info("БД уже существует: %s", DB_NAME)
+
+
 async def main():
     logger.info("КликТохн v%s — запуск…", VERSION)
+
+    # Копируем seed-БД, если нужно (для Railway Volume)
+    _ensure_db()
 
     # Инициализация БД
     await init_db()
