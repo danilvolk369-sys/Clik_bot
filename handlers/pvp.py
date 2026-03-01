@@ -1,820 +1,904 @@
 # ======================================================
-# PVP — Бои 1 на 1 (ручные, Bo1 / Bo3)
+# PvP — мини-игры: КНБ, Кости, Монетка, Слоты
+# Раунды: 1, 2, 3, 4
 # ======================================================
-
+import asyncio
 import random
-import aiosqlite
-from datetime import datetime
 
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
-from config import DB_NAME
+from config import MINIGAMES_OPEN_CLICKS
 from states import PVPStates
-from database import get_user, spend_clicks, update_clicks, invalidate_cache, create_transaction
+from database import (
+    get_user, create_pvp_game, get_open_pvp_games, get_pvp_game,
+    join_pvp_game, set_pvp_move, finish_pvp_game, draw_pvp_game,
+    cancel_pvp_game, update_pvp_round, get_user_pvp_history,
+    set_user_online, create_transaction, log_activity,
+)
 from keyboards import (
-    pvp_menu_kb, pvp_create_type_kb, pvp_bet_kb, pvp_rps_kb,
-    pvp_rounds_kb, pvp_dice_kb, pvp_flip_kb, pvp_slots_kb,
+    pvp_menu_kb, pvp_create_type_kb, pvp_rounds_kb, pvp_bet_kb,
+    pvp_rps_kb, pvp_dice_kb, pvp_flip_kb, pvp_slots_kb, pvp_ttt_kb,
+    minigames_menu_kb, back_menu_kb,
 )
 from handlers.common import fnum
 
+from banners_util import send_msg, safe_edit
+
 router = Router()
 
-# ─── Константы ───────────────────────────────────────────
-_GAME_NAMES = {
-    "rps":   "✂️ Камень-Ножницы-Бумага",
-    "dice":  "🎲 Кости",
-    "flip":  "🪙 Монетка",
-    "slots": "🎰 Слоты",
-}
-_GAME_SHORT = {
-    "rps": "✂️ КНБ", "dice": "🎲 Кости",
-    "flip": "🪙 Монетка", "slots": "🎰 Слоты",
-}
-_MIN_BET = 100
-
-_RPS_EMOJI = {"rock": "🪨 Камень", "scissors": "✂️ Ножницы", "paper": "📄 Бумага"}
-_RPS_WINS  = {"rock": "scissors", "scissors": "paper", "paper": "rock"}
-_DICE_FACE = {1: "⚀", 2: "⚁", 3: "⚂", 4: "⚃", 5: "⚄", 6: "⚅"}
-_FLIP_EMOJI = {"eagle": "🌕 Орёл", "tails": "🌑 Решка"}
-_SLOT_SYMBOLS = ["🍒", "🍋", "🍊", "🍇", "💎", "7️⃣", "🔔"]
+_pvp_ctx: dict = {}
 
 
-def _round_text(r: int) -> str:
-    return "Bo3 (до 2 побед)" if r == 3 else "Bo1 (1 раунд)"
+def _check_minigames(user) -> bool:
+    return (user["total_clicks"] or 0) >= MINIGAMES_OPEN_CLICKS
 
 
-# ════════════════════════════════════════════════════════════
-#  МЕНЮ PvP
-# ════════════════════════════════════════════════════════════
-@router.callback_query(F.data == "pvp_menu")
-async def show_pvp_menu(call: CallbackQuery, state: FSMContext = None):
-    if state:
-        await state.clear()
-    async with aiosqlite.connect(DB_NAME) as db:
-        row = await (await db.execute(
-            "SELECT COUNT(*) FROM pvp_games WHERE status='open'"
-        )).fetchone()
-        open_cnt = row[0] if row else 0
-    text = (
-        "⚔️ PVP — БОИ 1 НА 1\n"
-        "══════════════════════\n\n"
-        "┠🔍 Найти бои — список открытых\n"
-        "┠⚔️ Создать бой — бросить вызов\n"
-        "┗📊 Мои бои — история сражений\n\n"
-        f"🟢 Открытых боёв: {open_cnt}\n\n"
-        "══════════════════════"
-    )
-    try:
-        await call.message.edit_text(text, reply_markup=pvp_menu_kb())
-    except Exception:
-        await call.message.answer(text, reply_markup=pvp_menu_kb())
-    await call.answer()
-
-
-# ════════════════════════════════════════════════════════════
-#  🔍 НАЙТИ БОИ
-# ════════════════════════════════════════════════════════════
-@router.callback_query(F.data == "pvp_find")
-async def pvp_find(call: CallbackQuery):
-    uid = call.from_user.id
-    async with aiosqlite.connect(DB_NAME) as db:
-        cur = await db.execute(
-            "SELECT g.id, g.creator_id, g.bet, g.game_type, g.rounds, u.username "
-            "FROM pvp_games g LEFT JOIN users u ON u.user_id=g.creator_id "
-            "WHERE g.status='open' ORDER BY g.id DESC LIMIT 15"
-        )
-        games = await cur.fetchall()
-
-    if not games:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚔️ Создать бой", callback_data="pvp_create")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="pvp_menu")],
-        ])
-        await call.message.edit_text(
-            "🔍 ОТКРЫТЫЕ БОИ\n"
-            "══════════════════════\n\n"
-            "😔 Нет открытых боёв.\n"
-            "Создайте свой!\n\n"
-            "══════════════════════",
-            reply_markup=kb,
-        )
-        return await call.answer()
-
-    text = "🔍 ОТКРЫТЫЕ БОИ\n══════════════════════\n\n"
-    for gid, cid, bet, gt, rnds, uname in games:
-        name = f"@{uname}" if uname else f"ID:{cid}"
-        icon = _GAME_SHORT.get(gt, "❓")
-        own = " (ваш)" if cid == uid else ""
-        bo = "Bo3" if (rnds or 1) == 3 else "Bo1"
-        text += f"┠{icon} │ {int(bet):,} 💢 │ {bo} │ {name}{own}\n"
-
-    text += "\n══════════════════════\nНажмите, чтобы вступить:"
-
-    kb = []
-    for gid, cid, bet, gt, rnds, uname in games:
-        icon = _GAME_SHORT.get(gt, "❓")
-        bo = "Bo3" if (rnds or 1) == 3 else "Bo1"
-        kb.append([InlineKeyboardButton(
-            text=f"⚔️ {icon} │ {int(bet):,} 💢 │ {bo} │ #{gid}",
-            callback_data=f"pvp_join_{gid}",
-        )])
-    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pvp_menu")])
-
-    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-    await call.answer()
-
-
-# ════════════════════════════════════════════════════════════
-#  ⚔️ СОЗДАТЬ — тип → раунды → ставка
-# ════════════════════════════════════════════════════════════
-@router.callback_query(F.data == "pvp_create")
-async def pvp_create(call: CallbackQuery, state: FSMContext):
-    await state.clear()
+# ── Мини-игры меню ──
+@router.callback_query(F.data == "minigames_menu")
+async def minigames_menu(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     if not user:
         return await call.answer("❌ /start", show_alert=True)
+    await set_user_online(call.from_user.id)
+    if not _check_minigames(user):
+        return await call.answer(
+            f"🔒 Нужно {MINIGAMES_OPEN_CLICKS} кликов для мини-игр!",
+            show_alert=True,
+        )
     text = (
-        "⚔️ СОЗДАТЬ БОЙ\n"
+        "🎮 МИНИ-ИГРЫ\n"
         "══════════════════════\n\n"
-        "Выберите тип игры:\n\n"
-        "┠✂️ КНБ — Камень-Ножницы-Бумага\n"
-        "┠🎲 Кости — бросьте кости\n"
-        "┠🪙 Монетка — орёл или решка\n"
-        "┗🎰 Слоты — крутите барабан\n\n"
+        "⚔️ PvP — сражайся с игроками\n"
+        "💬 Чат — найди собеседника\n\n"
         "══════════════════════"
     )
+    await call.message.edit_text(text, reply_markup=minigames_menu_kb())
+    await call.answer()
+
+
+# ── PvP Главное меню ──
+@router.callback_query(F.data == "pvp_menu")
+async def pvp_menu(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await set_user_online(call.from_user.id)
+    text = (
+        "⚔️ PvP АРЕНА\n"
+        "══════════════════════\n\n"
+        "Создай бой или вступи в чужой.\n"
+        "Победитель получает ставки обоих.\n\n"
+        "══════════════════════"
+    )
+    await send_msg(call, text, reply_markup=pvp_menu_kb())
+
+
+# ── Создать ── Тип
+@router.callback_query(F.data == "pvp_create")
+async def pvp_create(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    text = "⚔️ СОЗДАТЬ БОЙ\n══════════════════════\n\nВыбери тип игры:"
     await call.message.edit_text(text, reply_markup=pvp_create_type_kb())
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("pvp_type_"))
-async def pvp_type_chosen(call: CallbackQuery, state: FSMContext):
-    gtype = call.data.replace("pvp_type_", "")
-    await state.update_data(pvp_type=gtype)
-    name = _GAME_NAMES.get(gtype, "❓")
-    text = (
-        "🔢 ФОРМАТ БОЯ\n"
-        "══════════════════════\n\n"
-        f"┠🎮 Игра: {name}\n\n"
-        "Выберите количество раундов:\n\n"
-        "┠1️⃣ Bo1 — один раунд решает\n"
-        "┗3️⃣ Bo3 — до двух побед\n\n"
-        "══════════════════════"
-    )
+async def pvp_set_type(call: CallbackQuery, state: FSMContext):
+    game_type = call.data.replace("pvp_type_", "")
+    _pvp_ctx[call.from_user.id] = {"type": game_type}
+    # Крестики-нолики — всегда 1 раунд, сразу к ставке
+    if game_type == "ttt":
+        _pvp_ctx[call.from_user.id]["rounds"] = 1
+        text = "💰 СТАВКА\n══════════════════════\n\n❌⭕ Крестики-Нолики (1 раунд)\nВыбери ставку:"
+        await call.message.edit_text(text, reply_markup=pvp_bet_kb())
+        return await call.answer()
+    text = "⚔️ КОЛИЧЕСТВО РАУНДОВ\n══════════════════════\n\nВыбери количество раундов:"
     await call.message.edit_text(text, reply_markup=pvp_rounds_kb())
     await call.answer()
 
 
+# ── Раунды
 @router.callback_query(F.data.startswith("pvp_rounds_"))
-async def pvp_rounds_chosen(call: CallbackQuery, state: FSMContext):
+async def pvp_set_rounds(call: CallbackQuery, state: FSMContext):
     rounds = int(call.data.replace("pvp_rounds_", ""))
-    await state.update_data(pvp_rounds=rounds)
-    data = await state.get_data()
-    gtype = data.get("pvp_type", "rps")
-    user = await get_user(call.from_user.id)
-    balance = user["clicks"] if user else 0
-    name = _GAME_NAMES.get(gtype, "❓")
-    text = (
-        "💰 СТАВКА\n"
-        "══════════════════════\n\n"
-        f"┠🎮 Игра: {name}\n"
-        f"┠🔢 Формат: {_round_text(rounds)}\n"
-        f"┗💳 Баланс: {fnum(balance)} 💢\n\n"
-        f"Минимальная ставка: {_MIN_BET} 💢\n\n"
-        "══════════════════════\n"
-        "Выберите сумму или введите свою:"
-    )
+    uid = call.from_user.id
+    if uid not in _pvp_ctx:
+        return await call.answer("❌ Начни создание заново", show_alert=True)
+    _pvp_ctx[uid]["rounds"] = rounds
+    text = f"💰 СТАВКА\n══════════════════════\n\nРаундов: {rounds}\nВыбери ставку:"
     await call.message.edit_text(text, reply_markup=pvp_bet_kb())
     await call.answer()
 
 
-# ─── Быстрая ставка ───
-@router.callback_query(F.data.regexp(r"^pvp_bet_\d+$"))
-async def pvp_quick_bet(call: CallbackQuery, state: FSMContext):
-    bet = int(call.data.replace("pvp_bet_", ""))
-    await _create_game(call, state, bet)
+# ── Ставка
+@router.callback_query(F.data.startswith("pvp_bet_"))
+async def pvp_set_bet(call: CallbackQuery, state: FSMContext):
+    uid = call.from_user.id
+    if uid not in _pvp_ctx:
+        return await call.answer("❌ Начни создание заново", show_alert=True)
 
+    raw = call.data.replace("pvp_bet_", "")
+    if raw == "custom":
+        await state.set_state(PVPStates.waiting_bet)
+        text = "✏️ Введи свою ставку (число):"
+        await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="pvp_menu")]
+        ]))
+        return await call.answer()
 
-# ─── Своя сумма ───
-@router.callback_query(F.data == "pvp_bet_custom")
-async def pvp_custom_bet(call: CallbackQuery, state: FSMContext):
-    await state.set_state(PVPStates.waiting_bet)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="pvp_create")],
-    ])
-    await call.message.edit_text(
-        f"✏️ СВОЯ СТАВКА\n"
-        f"══════════════════════\n\n"
-        f"Введите сумму (мин. {_MIN_BET} 💢):",
-        reply_markup=kb,
-    )
-    await call.answer()
+    bet = float(raw)
+    await _create_the_game(call, uid, bet)
 
 
 @router.message(PVPStates.waiting_bet)
-async def pvp_manual_bet(message: Message, state: FSMContext):
-    txt = (message.text or "").strip().replace(",", ".")
-    try:
-        bet = int(float(txt))
-        assert bet >= _MIN_BET
-    except (ValueError, AssertionError):
-        return await message.answer(f"❌ Введите число не менее {_MIN_BET}:")
-    await _create_game_msg(message, state, bet)
-
-
-# ─── Создание (callback) ───
-async def _create_game(call: CallbackQuery, state: FSMContext, bet: int):
-    uid = call.from_user.id
-    user = await get_user(uid)
-    if not user or user["clicks"] < bet:
-        return await call.answer("❌ Недостаточно 💢!", show_alert=True)
-    data = await state.get_data()
-    gtype = data.get("pvp_type", "rps")
-    rounds = data.get("pvp_rounds", 1)
-    if not await spend_clicks(uid, bet):
-        return await call.answer("❌ Недостаточно 💢!", show_alert=True)
-    gid = await _insert_game(uid, bet, gtype, rounds)
+async def pvp_custom_bet(message: Message, state: FSMContext):
     await state.clear()
-    name = _GAME_NAMES.get(gtype, "❓")
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚫 Отменить бой", callback_data=f"pvp_cancel_{gid}")],
-        [InlineKeyboardButton(text="🔍 Все бои", callback_data="pvp_find")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="pvp_menu")],
-    ])
-    text = (
-        "✅ БОЙ СОЗДАН!\n"
-        "══════════════════════\n\n"
-        f"┠🆔 Бой: #{gid}\n"
-        f"┠🎮 Игра: {name}\n"
-        f"┠🔢 Формат: {_round_text(rounds)}\n"
-        f"┠💰 Ставка: {bet:,} 💢\n"
-        f"┗⏳ Ожидание противника...\n\n"
-        "══════════════════════"
-    )
-    await call.message.edit_text(text, reply_markup=kb)
-    await call.answer("✅ Бой создан!", show_alert=True)
-
-
-# ─── Создание (message) ───
-async def _create_game_msg(message: Message, state: FSMContext, bet: int):
     uid = message.from_user.id
+    try:
+        bet = float(message.text.strip())
+        if bet < 10:
+            return await message.answer("❌ Минимум 10 💢", reply_markup=back_menu_kb())
+    except (ValueError, TypeError):
+        return await message.answer("❌ Введи число", reply_markup=back_menu_kb())
+    # Отправим новое сообщение вместо edit
     user = await get_user(uid)
-    if not user or user["clicks"] < bet:
-        return await message.answer("❌ Недостаточно 💢!")
-    data = await state.get_data()
-    gtype = data.get("pvp_type", "rps")
-    rounds = data.get("pvp_rounds", 1)
-    if not await spend_clicks(uid, bet):
-        return await message.answer("❌ Недостаточно 💢!")
-    gid = await _insert_game(uid, bet, gtype, rounds)
-    await state.clear()
-    name = _GAME_NAMES.get(gtype, "❓")
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚫 Отменить бой", callback_data=f"pvp_cancel_{gid}")],
-        [InlineKeyboardButton(text="🔍 Все бои", callback_data="pvp_find")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="pvp_menu")],
-    ])
+    if not user or float(user["clicks"]) < bet:
+        return await message.answer("❌ Недостаточно 💢", reply_markup=back_menu_kb())
+    if uid not in _pvp_ctx:
+        return await message.answer("❌ Начни заново", reply_markup=back_menu_kb())
+    ctx = _pvp_ctx[uid]
+    game_type = ctx.get("type", "rps")
+    rounds = ctx.get("rounds", 1)
+    game_id = await create_pvp_game(uid, bet, game_type, rounds)
+    _pvp_ctx.pop(uid, None)
+    await log_activity(uid, "pvp", f"Создал PvP #{game_id}: {game_type} x{rounds} ставка {bet}")
+    await create_transaction("pvp", uid, amount=bet, details=f"Создание PvP #{game_id}")
     text = (
-        "✅ БОЙ СОЗДАН!\n"
-        "══════════════════════\n\n"
-        f"┠🆔 Бой: #{gid}\n"
-        f"┠🎮 Игра: {name}\n"
-        f"┠🔢 Формат: {_round_text(rounds)}\n"
-        f"┠💰 Ставка: {bet:,} 💢\n"
-        f"┗⏳ Ожидание противника...\n\n"
-        "══════════════════════"
+        f"✅ Бой #{game_id} создан!\n\n"
+        f"🎮 Тип: {_type_name(game_type)}\n"
+        f"🔄 Раундов: {rounds}\n"
+        f"💰 Ставка: {fnum(bet)} 💢\n\n"
+        f"Ожидаем оппонента..."
     )
-    await message.answer(text, reply_markup=kb)
+    await message.answer(text, reply_markup=pvp_menu_kb())
 
 
-async def _insert_game(creator_id: int, bet: int, gtype: str, rounds: int) -> int:
-    async with aiosqlite.connect(DB_NAME) as db:
-        cur = await db.execute(
-            "INSERT INTO pvp_games "
-            "(creator_id, bet, game_type, rounds, round_num, "
-            "creator_score, opponent_score, status, created_at) "
-            "VALUES (?,?,?,?,1,0,0,'open',?)",
-            (creator_id, bet, gtype, rounds, datetime.now().isoformat()),
-        )
-        gid = cur.lastrowid
-        await db.commit()
-    return gid
-
-
-# ════════════════════════════════════════════════════════════
-#  🚫 ОТМЕНА БОЯ
-# ════════════════════════════════════════════════════════════
-@router.callback_query(F.data.startswith("pvp_cancel_"))
-async def pvp_cancel(call: CallbackQuery):
-    gid = int(call.data.split("_")[-1])
-    async with aiosqlite.connect(DB_NAME) as db:
-        cur = await db.execute(
-            "SELECT creator_id, bet, status FROM pvp_games WHERE id=?", (gid,)
-        )
-        g = await cur.fetchone()
-        if not g or g[0] != call.from_user.id or g[2] != "open":
-            return await call.answer("❌ Нельзя отменить", show_alert=True)
-        await db.execute("DELETE FROM pvp_games WHERE id=?", (gid,))
-        await db.execute(
-            "UPDATE users SET clicks=clicks+? WHERE user_id=?",
-            (g[1], call.from_user.id),
-        )
-        await db.commit()
-    invalidate_cache(call.from_user.id)
-    await call.answer("✅ Ставка возвращена!", show_alert=True)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚔️ Создать бой", callback_data="pvp_create")],
-        [InlineKeyboardButton(text="🔍 Все бои", callback_data="pvp_find")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="pvp_menu")],
-    ])
-    await call.message.edit_text(
-        "🚫 БОЙ ОТМЕНЁН\n"
-        "══════════════════════\n\n"
-        f"┠🆔 Бой: #{gid}\n"
-        f"┗💰 Ставка {int(g[1]):,} 💢 возвращена\n\n"
-        "══════════════════════",
-        reply_markup=kb,
+async def _create_the_game(call: CallbackQuery, uid: int, bet: float):
+    user = await get_user(uid)
+    if not user or float(user["clicks"]) < bet:
+        return await call.answer("❌ Недостаточно 💢", show_alert=True)
+    ctx = _pvp_ctx.get(uid, {})
+    game_type = ctx.get("type", "rps")
+    rounds = ctx.get("rounds", 1)
+    game_id = await create_pvp_game(uid, bet, game_type, rounds)
+    _pvp_ctx.pop(uid, None)
+    await log_activity(uid, "pvp", f"Создал PvP #{game_id}: {game_type} x{rounds} ставка {bet}")
+    await create_transaction("pvp", uid, amount=bet, details=f"Создание PvP #{game_id}")
+    text = (
+        f"✅ Бой #{game_id} создан!\n\n"
+        f"🎮 Тип: {_type_name(game_type)}\n"
+        f"🔄 Раундов: {rounds}\n"
+        f"💰 Ставка: {fnum(bet)} 💢\n\n"
+        f"Ожидаем оппонента..."
     )
+    await call.message.edit_text(text, reply_markup=pvp_menu_kb())
+    await call.answer()
 
 
-# ════════════════════════════════════════════════════════════
-#  ⚔️ ВСТУПИТЬ В БОЙ
-# ════════════════════════════════════════════════════════════
+def _type_name(t: str) -> str:
+    return {"rps": "✂️ КНБ", "dice": "🎲 Кости", "flip": "🪙 Монетка", "slots": "🎰 Слоты", "ttt": "❌⭕ Крестики-Нолики"}.get(t, t)
+
+
+# ── Найти бои ──
+@router.callback_query(F.data == "pvp_find")
+async def pvp_find(call: CallbackQuery):
+    await set_user_online(call.from_user.id)
+    games = await get_open_pvp_games()
+    if not games:
+        text = "⚔️ Нет открытых боёв.\n\nСоздай свой!"
+        await call.message.edit_text(text, reply_markup=pvp_menu_kb())
+        return await call.answer()
+
+    kb = []
+    for g in games[:10]:
+        gid, creator_id, bet, gtype, rounds = g
+        type_name = _type_name(gtype)
+        kb.append([InlineKeyboardButton(
+            text=f"⚔️ #{gid} │ {type_name} x{rounds} │ {fnum(bet)} 💢",
+            callback_data=f"pvp_join_{gid}",
+        )])
+    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pvp_menu")])
+    await call.message.edit_text("⚔️ ОТКРЫТЫЕ БОИ\n══════════════════════\n\nВыбери бой:",
+                                  reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
+
+
+# ── Присоединиться ──
 @router.callback_query(F.data.startswith("pvp_join_"))
 async def pvp_join(call: CallbackQuery):
-    gid = int(call.data.split("_")[-1])
+    game_id = int(call.data.replace("pvp_join_", ""))
     uid = call.from_user.id
+    game = await get_pvp_game(game_id)
+    if not game or game["status"] != "open":
+        return await call.answer("❌ Бой уже начат или не найден", show_alert=True)
+    if game["creator_id"] == uid:
+        return await call.answer("❌ Нельзя играть с собой", show_alert=True)
 
-    async with aiosqlite.connect(DB_NAME) as db:
-        cur = await db.execute(
-            "SELECT creator_id, bet, game_type, status, rounds "
-            "FROM pvp_games WHERE id=?", (gid,),
+    success = await join_pvp_game(game_id, uid)
+    if not success:
+        return await call.answer("❌ Недостаточно 💢", show_alert=True)
+
+    await log_activity(uid, "pvp", f"Вступил в PvP #{game_id}")
+    await create_transaction("pvp", uid, amount=float(game["bet"]), details=f"Вступление в PvP #{game_id}")
+
+    game = await get_pvp_game(game_id)
+    gtype = game["game_type"]
+
+    # Крестики-нолики: инициализация доски
+    if gtype == "ttt":
+        board = "." * 9
+        # creator_move хранит доску, opponent_move хранит чей ход ("X"=creator, "O"=opponent)
+        await set_pvp_move(game_id, game["creator_id"], board)
+        await set_pvp_move(game_id, uid, "X")  # opponent_move = "X" → ход создателя (❌)
+        kb = pvp_ttt_kb(game_id, board)
+        text = (
+            f"❌⭕ БОЙ #{game_id} НАЧАЛСЯ!\n"
+            f"══════════════════════\n\n"
+            f"💰 Ставка: {fnum(game['bet'])} 💢\n\n"
+            f"❌ ходит первым!\n"
+            f"Создатель — ❌, Оппонент — ⭕"
         )
-        g = await cur.fetchone()
-
-    if not g or g[3] != "open":
-        return await call.answer("❌ Бой недоступен", show_alert=True)
-    if g[0] == uid:
-        return await call.answer("❌ Нельзя играть с собой!", show_alert=True)
-
-    creator_id, bet, gtype, _, rounds = g
-    rounds = rounds or 1
-    user = await get_user(uid)
-    if not user or user["clicks"] < bet:
-        return await call.answer(f"❌ Нужно {int(bet):,} 💢!", show_alert=True)
-    if not await spend_clicks(uid, bet):
-        return await call.answer("❌ Недостаточно 💢!", show_alert=True)
-
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "UPDATE pvp_games SET opponent_id=?, status='playing' WHERE id=?",
-            (uid, gid),
-        )
-        await db.commit()
-
-    # Отправляем игровое поле обоим
-    await _send_round_board(call.bot, gid, gtype, rounds,
-                            creator_id, uid, bet, 1, 0, 0)
-    await call.answer("⚔️ Бой начался!", show_alert=True)
-
-
-# ════════════════════════════════════════════════════════════
-#  📩 ИГРОВОЕ ПОЛЕ (отправка обоим)
-# ════════════════════════════════════════════════════════════
-async def _send_round_board(bot, gid, gtype, rounds, p1, p2, bet,
-                            round_num, s1, s2):
-    total = int(bet * 2)
-    name = _GAME_NAMES.get(gtype, "❓")
-    bo = _round_text(rounds)
-
-    hdr = (
-        f"⚔️ БОЙ #{gid}\n"
-        f"══════════════════════\n\n"
-        f"┠🎮 {name}\n"
-        f"┠🔢 {bo}\n"
-        f"┠💰 Банк: {total:,} 💢\n"
-    )
-    if rounds == 3:
-        hdr += f"┠🏅 Счёт: {s1} : {s2}\n"
-    hdr += f"┗🔄 Раунд {round_num}\n\n"
-
-    tips = {
-        "rps":   "Выберите ваш ход:",
-        "dice":  "Нажмите, чтобы бросить кости:",
-        "flip":  "Выберите сторону монетки:",
-        "slots": "Нажмите, чтобы крутить барабан:",
-    }
-    hdr += tips.get(gtype, "") + "\n\n══════════════════════"
-
-    kbs = {
-        "rps":   pvp_rps_kb(gid),
-        "dice":  pvp_dice_kb(gid),
-        "flip":  pvp_flip_kb(gid),
-        "slots": pvp_slots_kb(gid),
-    }
-    kb = kbs.get(gtype, pvp_rps_kb(gid))
-
-    for pid in (p1, p2):
+        await call.message.edit_text(text, reply_markup=kb)
+        await call.answer()
         try:
-            await bot.send_message(pid, hdr, reply_markup=kb)
+            await call.bot.send_message(game["creator_id"], text, reply_markup=kb)
         except Exception:
             pass
+        return
 
+    text = (
+        f"⚔️ БОЙ #{game_id} НАЧАЛСЯ!\n"
+        f"══════════════════════\n\n"
+        f"🎮 {_type_name(gtype)} │ Раунд 1/{game['rounds']}\n"
+        f"💰 Ставка: {fnum(game['bet'])} 💢\n\n"
+        f"Сделайте ход!"
+    )
+    kb = _game_kb(gtype, game_id)
+    await call.message.edit_text(text, reply_markup=kb)
+    await call.answer()
 
-# ════════════════════════════════════════════════════════════
-#  ХОДЫ — все типы игр
-# ════════════════════════════════════════════════════════════
-
-# ✂️ КНБ
-@router.callback_query(F.data.regexp(r"^rps_\d+_(rock|scissors|paper)$"))
-async def rps_move(call: CallbackQuery):
-    parts = call.data.split("_")
-    await _process_move(call, int(parts[1]), parts[2])
-
-
-# 🎲 Кости
-@router.callback_query(F.data.regexp(r"^dice_\d+_roll$"))
-async def dice_roll(call: CallbackQuery):
-    gid = int(call.data.split("_")[1])
-    await _process_move(call, gid, str(random.randint(1, 6)))
-
-
-# 🪙 Монетка
-@router.callback_query(F.data.regexp(r"^flip_\d+_(eagle|tails)$"))
-async def flip_choice(call: CallbackQuery):
-    parts = call.data.split("_")
-    await _process_move(call, int(parts[1]), parts[2])
-
-
-# 🎰 Слоты
-@router.callback_query(F.data.regexp(r"^slots_\d+_spin$"))
-async def slots_spin(call: CallbackQuery):
-    gid = int(call.data.split("_")[1])
-    syms = [random.choice(_SLOT_SYMBOLS) for _ in range(3)]
-    await _process_move(call, gid, "|".join(syms))
-
-
-# ════════════════════════════════════════════════════════════
-#  🔄 ОБЩАЯ ЛОГИКА ХОДА
-# ════════════════════════════════════════════════════════════
-async def _process_move(call: CallbackQuery, game_id: int, move: str):
-    uid = call.from_user.id
-
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM pvp_games WHERE id=?", (game_id,))
-        g = await cur.fetchone()
-
-    if not g or g["status"] != "playing":
-        return await call.answer("❌ Игра недоступна", show_alert=True)
-
-    cid, oid = g["creator_id"], g["opponent_id"]
-
-    if uid == cid:
-        if g["creator_move"]:
-            return await call.answer("⏳ Вы уже сделали ход!", show_alert=True)
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute(
-                "UPDATE pvp_games SET creator_move=? WHERE id=?", (move, game_id)
-            )
-            await db.commit()
-    elif uid == oid:
-        if g["opponent_move"]:
-            return await call.answer("⏳ Вы уже сделали ход!", show_alert=True)
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute(
-                "UPDATE pvp_games SET opponent_move=? WHERE id=?", (move, game_id)
-            )
-            await db.commit()
-    else:
-        return await call.answer("❌ Вы не участник", show_alert=True)
-
-    # Показываем подтверждение хода
-    mt = _move_display(g["game_type"], move)
-    await call.answer(f"✅ {mt}", show_alert=True)
+    # Уведомить создателя
     try:
-        await call.message.edit_text(
-            f"⏳ ХОД СДЕЛАН\n"
-            f"══════════════════════\n\n"
-            f"┠🆔 Бой: #{game_id}\n"
-            f"┠✅ {mt}\n"
-            f"┗⏳ Ожидание соперника...\n\n"
-            f"══════════════════════"
+        bot: Bot = call.bot
+        await bot.send_message(
+            game["creator_id"],
+            f"⚔️ Оппонент найден! Бой #{game_id}\n\n{_type_name(gtype)} │ Раунд 1/{game['rounds']}\nСделайте ход!",
+            reply_markup=kb,
         )
     except Exception:
         pass
 
-    # Проверяем оба хода (перечитываем свежие данные)
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM pvp_games WHERE id=?", (game_id,))
-        fresh = await cur.fetchone()
 
-    if fresh["creator_move"] and fresh["opponent_move"]:
-        await _resolve_round(call.bot, game_id)
-
-
-def _move_display(gtype: str, move: str) -> str:
+def _game_kb(gtype: str, game_id: int):
     if gtype == "rps":
-        return _RPS_EMOJI.get(move, move)
-    if gtype == "dice":
-        n = int(move)
-        return f"Вы выбросили {_DICE_FACE.get(n, '?')} {n}"
-    if gtype == "flip":
-        return f"Ваш выбор: {_FLIP_EMOJI.get(move, move)}"
-    # slots
-    return f"Ваши слоты: {' '.join(move.split('|'))}"
+        return pvp_rps_kb(game_id)
+    elif gtype == "dice":
+        return pvp_dice_kb(game_id)
+    elif gtype == "flip":
+        return pvp_flip_kb(game_id)
+    elif gtype == "slots":
+        return pvp_slots_kb(game_id)
+    elif gtype == "ttt":
+        return pvp_ttt_kb(game_id, "." * 9)
+    return pvp_rps_kb(game_id)
 
 
-# ════════════════════════════════════════════════════════════
-#  ⚖️ РЕЗУЛЬТАТ РАУНДА
-# ════════════════════════════════════════════════════════════
-async def _resolve_round(bot, game_id: int):
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM pvp_games WHERE id=?", (game_id,))
-        g = await cur.fetchone()
+# ══════════════════════════════════════════
+#  КНБ (Камень-Ножницы-Бумага)
+# ══════════════════════════════════════════
+@router.callback_query(F.data.regexp(r"^rps_(\d+)_(rock|scissors|paper)$"))
+async def rps_move(call: CallbackQuery):
+    parts = call.data.split("_")
+    game_id = int(parts[1])
+    move = parts[2]
+    uid = call.from_user.id
 
-    if not g or g["status"] != "playing":
-        return
-    if not g["creator_move"] or not g["opponent_move"]:
-        return
+    game = await get_pvp_game(game_id)
+    if not game or game["status"] != "active":
+        return await call.answer("❌ Бой не активен", show_alert=True)
+    if uid not in (game["creator_id"], game["opponent_id"]):
+        return await call.answer("❌ Это не ваш бой", show_alert=True)
 
-    cid      = g["creator_id"]
-    oid      = g["opponent_id"]
-    c_move   = g["creator_move"]
-    o_move   = g["opponent_move"]
-    bet      = g["bet"]
-    gtype    = g["game_type"]
-    rounds   = g["rounds"] or 1
-    rnd      = g["round_num"] or 1
-    s1       = g["creator_score"] or 0
-    s2       = g["opponent_score"] or 0
-    total    = int(bet * 2)
-    need     = 2 if rounds == 3 else 1
+    # Проверка что уже ходил
+    is_creator = uid == game["creator_id"]
+    if is_creator and game["creator_move"]:
+        return await call.answer("⏳ Ожидаем ход оппонента", show_alert=True)
+    if not is_creator and game["opponent_move"]:
+        return await call.answer("⏳ Ожидаем ход оппонента", show_alert=True)
 
-    # Определяем победителя раунда + текст ходов
-    winner, moves_text = _resolve_by_type(gtype, c_move, o_move)
+    await set_pvp_move(game_id, uid, move)
+    await call.answer("✅ Ход принят!")
 
-    # Шапка
-    name = _GAME_NAMES.get(gtype, "❓")
-    hdr = (
-        f"⚔️ БОЙ #{game_id} — РАУНД {rnd}\n"
+    game = await get_pvp_game(game_id)
+    if game["creator_move"] and game["opponent_move"]:
+        await _resolve_rps_round(call, game)
+    else:
+        await call.message.edit_text(
+            f"⏳ Бой #{game_id}\n\nВаш ход: {_move_emoji(move)}\nОжидаем оппонента...",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
+        )
+
+
+def _move_emoji(m: str) -> str:
+    return {"rock": "🪨", "scissors": "✂️", "paper": "📄"}.get(m, m)
+
+
+def _rps_winner(m1: str, m2: str) -> int:
+    """0 = ничья, 1 = m1 wins, 2 = m2 wins"""
+    if m1 == m2:
+        return 0
+    wins = {"rock": "scissors", "scissors": "paper", "paper": "rock"}
+    return 1 if wins[m1] == m2 else 2
+
+
+async def _resolve_rps_round(call: CallbackQuery, game):
+    gid = game["id"]
+    cm = game["creator_move"]
+    om = game["opponent_move"]
+    result = _rps_winner(cm, om)
+
+    cs = game["creator_score"]
+    os_ = game["opponent_score"]
+    rnd = game["round_num"]
+    total_rounds = game["rounds"]
+
+    if result == 1:
+        cs += 1
+    elif result == 2:
+        os_ += 1
+
+    text = (
+        f"⚔️ Бой #{gid} │ Раунд {rnd}/{total_rounds}\n"
         f"══════════════════════\n\n"
-        f"┠🎮 {name}\n"
-        f"┠💰 Банк: {total:,} 💢\n"
+        f"Игрок 1: {_move_emoji(cm)}\n"
+        f"Игрок 2: {_move_emoji(om)}\n\n"
     )
-    if rounds == 3:
-        hdr += f"┠🏅 Счёт: {s1} : {s2}\n"
-    hdr += f"┗🔄 Раунд {rnd}\n\n{moves_text}\n"
 
-    # ──── НИЧЬЯ В РАУНДЕ → переигровка ────
-    if winner == "draw":
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute(
-                "UPDATE pvp_games SET creator_move=NULL, opponent_move=NULL "
-                "WHERE id=?", (game_id,),
-            )
-            await db.commit()
+    if result == 0:
+        text += "🤝 Ничья в раунде!\n"
+    elif result == 1:
+        text += "🏆 Раунд: Игрок 1!\n"
+    else:
+        text += "🏆 Раунд: Игрок 2!\n"
 
-        draw_txt = hdr + (
-            "══════════════════════\n\n"
-            "🤝 Ничья в раунде! Переигровка...\n\n"
-            "══════════════════════"
+    text += f"\n📊 Счёт: {cs} — {os_}\n"
+
+    if rnd >= total_rounds:
+        await _finish_game(call, game, cs, os_, text)
+    else:
+        await update_pvp_round(gid, cs, os_, rnd + 1)
+        text += f"\n▶️ Следующий раунд {rnd + 1}/{total_rounds}!"
+        kb = pvp_rps_kb(gid)
+        try:
+            await call.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        try:
+            other_id = game["opponent_id"] if call.from_user.id == game["creator_id"] else game["creator_id"]
+            await call.bot.send_message(other_id, text, reply_markup=kb)
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════
+#  КОСТИ
+# ══════════════════════════════════════════
+@router.callback_query(F.data.regexp(r"^dice_(\d+)_roll$"))
+async def dice_roll(call: CallbackQuery):
+    game_id = int(call.data.split("_")[1])
+    uid = call.from_user.id
+    game = await get_pvp_game(game_id)
+    if not game or game["status"] != "active":
+        return await call.answer("❌ Бой не активен", show_alert=True)
+    if uid not in (game["creator_id"], game["opponent_id"]):
+        return await call.answer("❌ Это не ваш бой", show_alert=True)
+
+    is_creator = uid == game["creator_id"]
+    if is_creator and game["creator_move"]:
+        return await call.answer("⏳ Ожидаем оппонента", show_alert=True)
+    if not is_creator and game["opponent_move"]:
+        return await call.answer("⏳ Ожидаем оппонента", show_alert=True)
+
+    roll = str(random.randint(1, 6))
+    await set_pvp_move(game_id, uid, roll)
+    await call.answer(f"🎲 Вы выбросили: {roll}")
+
+    game = await get_pvp_game(game_id)
+    if game["creator_move"] and game["opponent_move"]:
+        await _resolve_dice_round(call, game)
+    else:
+        await call.message.edit_text(
+            f"🎲 Бой #{game_id}\n\nВы бросили: {roll}\nОжидаем оппонента...",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
         )
-        for pid in (cid, oid):
+
+
+async def _resolve_dice_round(call, game):
+    gid = game["id"]
+    cm = int(game["creator_move"])
+    om = int(game["opponent_move"])
+    cs = game["creator_score"]
+    os_ = game["opponent_score"]
+    rnd = game["round_num"]
+    total = game["rounds"]
+
+    if cm > om:
+        cs += 1
+        result_text = "🏆 Раунд: Игрок 1!"
+    elif om > cm:
+        os_ += 1
+        result_text = "🏆 Раунд: Игрок 2!"
+    else:
+        result_text = "🤝 Ничья в раунде!"
+
+    text = (
+        f"🎲 Бой #{gid} │ Раунд {rnd}/{total}\n"
+        f"══════════════════════\n\n"
+        f"Игрок 1: 🎲 {cm}\nИгрок 2: 🎲 {om}\n\n"
+        f"{result_text}\n📊 Счёт: {cs} — {os_}\n"
+    )
+
+    if rnd >= total:
+        await _finish_game(call, game, cs, os_, text)
+    else:
+        await update_pvp_round(gid, cs, os_, rnd + 1)
+        text += f"\n▶️ Следующий раунд {rnd + 1}/{total}!"
+        kb = pvp_dice_kb(gid)
+        try:
+            await call.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        try:
+            other_id = game["opponent_id"] if call.from_user.id == game["creator_id"] else game["creator_id"]
+            await call.bot.send_message(other_id, text, reply_markup=kb)
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════
+#  МОНЕТКА
+# ══════════════════════════════════════════
+@router.callback_query(F.data.regexp(r"^flip_(\d+)_(eagle|tails)$"))
+async def flip_move(call: CallbackQuery):
+    parts = call.data.split("_")
+    game_id = int(parts[1])
+    move = parts[2]
+    uid = call.from_user.id
+    game = await get_pvp_game(game_id)
+    if not game or game["status"] != "active":
+        return await call.answer("❌ Не активен", show_alert=True)
+    if uid not in (game["creator_id"], game["opponent_id"]):
+        return await call.answer("❌ Не ваш бой", show_alert=True)
+
+    is_creator = uid == game["creator_id"]
+    if is_creator and game["creator_move"]:
+        return await call.answer("⏳", show_alert=True)
+    if not is_creator and game["opponent_move"]:
+        return await call.answer("⏳", show_alert=True)
+
+    await set_pvp_move(game_id, uid, move)
+    await call.answer("✅ Ход принят!")
+    game = await get_pvp_game(game_id)
+    if game["creator_move"] and game["opponent_move"]:
+        await _resolve_flip_round(call, game)
+    else:
+        e = "🌕 Орёл" if move == "eagle" else "🌑 Решка"
+        await call.message.edit_text(
+            f"🪙 Бой #{game_id}\n\nВы: {e}\nОжидаем оппонента...",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
+        )
+
+
+async def _resolve_flip_round(call, game):
+    gid = game["id"]
+    cm = game["creator_move"]
+    om = game["opponent_move"]
+    flip_result = random.choice(["eagle", "tails"])
+    cs = game["creator_score"]
+    os_ = game["opponent_score"]
+    rnd = game["round_num"]
+    total = game["rounds"]
+
+    if cm == flip_result:
+        cs += 1
+    if om == flip_result:
+        os_ += 1
+
+    f_name = "🌕 Орёл" if flip_result == "eagle" else "🌑 Решка"
+    text = (
+        f"🪙 Бой #{gid} │ Раунд {rnd}/{total}\n"
+        f"══════════════════════\n\n"
+        f"Монета выпала: {f_name}\n"
+        f"Игрок 1: {'🌕 Орёл' if cm == 'eagle' else '🌑 Решка'}\n"
+        f"Игрок 2: {'🌕 Орёл' if om == 'eagle' else '🌑 Решка'}\n\n"
+        f"📊 Счёт: {cs} — {os_}\n"
+    )
+
+    if rnd >= total:
+        await _finish_game(call, game, cs, os_, text)
+    else:
+        await update_pvp_round(gid, cs, os_, rnd + 1)
+        text += f"\n▶️ Следующий раунд {rnd + 1}/{total}!"
+        kb = pvp_flip_kb(gid)
+        try:
+            await call.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        try:
+            other_id = game["opponent_id"] if call.from_user.id == game["creator_id"] else game["creator_id"]
+            await call.bot.send_message(other_id, text, reply_markup=kb)
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════
+#  СЛОТЫ
+# ══════════════════════════════════════════
+_SLOT_SYMBOLS = ["🍒", "🍊", "🍋", "🔔", "⭐", "7️⃣"]
+
+
+@router.callback_query(F.data.regexp(r"^slots_(\d+)_spin$"))
+async def slots_spin(call: CallbackQuery):
+    game_id = int(call.data.split("_")[1])
+    uid = call.from_user.id
+    game = await get_pvp_game(game_id)
+    if not game or game["status"] != "active":
+        return await call.answer("❌ Не активен", show_alert=True)
+    if uid not in (game["creator_id"], game["opponent_id"]):
+        return await call.answer("❌ Не ваш бой", show_alert=True)
+
+    is_creator = uid == game["creator_id"]
+    if is_creator and game["creator_move"]:
+        return await call.answer("⏳", show_alert=True)
+    if not is_creator and game["opponent_move"]:
+        return await call.answer("⏳", show_alert=True)
+
+    result = [random.choice(_SLOT_SYMBOLS) for _ in range(3)]
+    score = _calc_slot_score(result)
+    move = f"{','.join(result)}:{score}"
+    await set_pvp_move(game_id, uid, move)
+    await call.answer(f"🎰 {' '.join(result)} = {score} очков")
+
+    game = await get_pvp_game(game_id)
+    if game["creator_move"] and game["opponent_move"]:
+        await _resolve_slots_round(call, game)
+    else:
+        await call.message.edit_text(
+            f"🎰 Бой #{game_id}\n\n{' '.join(result)} = {score} очков\nОжидаем оппонента...",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
+        )
+
+
+def _calc_slot_score(symbols: list) -> int:
+    if len(set(symbols)) == 1:
+        return 100 if symbols[0] == "7️⃣" else 50
+    if len(set(symbols)) == 2:
+        return 20
+    return random.randint(1, 10)
+
+
+async def _resolve_slots_round(call, game):
+    gid = game["id"]
+    cm_parts = game["creator_move"].split(":")
+    om_parts = game["opponent_move"].split(":")
+    c_score = int(cm_parts[1])
+    o_score = int(om_parts[1])
+    c_symbols = cm_parts[0]
+    o_symbols = om_parts[0]
+
+    cs = game["creator_score"]
+    os_ = game["opponent_score"]
+    rnd = game["round_num"]
+    total = game["rounds"]
+
+    if c_score > o_score:
+        cs += 1
+        rt = "🏆 Раунд: Игрок 1!"
+    elif o_score > c_score:
+        os_ += 1
+        rt = "🏆 Раунд: Игрок 2!"
+    else:
+        rt = "🤝 Ничья!"
+
+    text = (
+        f"🎰 Бой #{gid} │ Раунд {rnd}/{total}\n"
+        f"══════════════════════\n\n"
+        f"Игрок 1: {c_symbols.replace(',', ' ')} = {c_score}\n"
+        f"Игрок 2: {o_symbols.replace(',', ' ')} = {o_score}\n\n"
+        f"{rt}\n📊 Счёт: {cs} — {os_}\n"
+    )
+
+    if rnd >= total:
+        await _finish_game(call, game, cs, os_, text)
+    else:
+        await update_pvp_round(gid, cs, os_, rnd + 1)
+        text += f"\n▶️ Следующий раунд {rnd + 1}/{total}!"
+        kb = pvp_slots_kb(gid)
+        try:
+            await call.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        try:
+            other_id = game["opponent_id"] if call.from_user.id == game["creator_id"] else game["creator_id"]
+            await call.bot.send_message(other_id, text, reply_markup=kb)
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════
+#  КРЕСТИКИ-НОЛИКИ
+# ══════════════════════════════════════════
+_TTT_WIN_LINES = [
+    (0, 1, 2), (3, 4, 5), (6, 7, 8),  # rows
+    (0, 3, 6), (1, 4, 7), (2, 5, 8),  # cols
+    (0, 4, 8), (2, 4, 6),             # diags
+]
+
+
+def _ttt_check_winner(board: str):
+    """Возвращает 'X', 'O' или None. Если ничья (все заняты и нет победителя) — 'draw'."""
+    for a, b, c in _TTT_WIN_LINES:
+        if board[a] == board[b] == board[c] and board[a] != ".":
+            return board[a]
+    if "." not in board:
+        return "draw"
+    return None
+
+
+def _ttt_board_text(board: str) -> str:
+    _sym = {"X": "❌", "O": "⭕", ".": "⬜"}
+    lines = []
+    for r in range(3):
+        lines.append(" ".join(_sym[board[r * 3 + c]] for c in range(3)))
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data.regexp(r"^ttt_(\d+)_(\d)$"))
+async def ttt_move(call: CallbackQuery):
+    parts = call.data.split("_")
+    game_id = int(parts[1])
+    cell = int(parts[2])
+    uid = call.from_user.id
+
+    game = await get_pvp_game(game_id)
+    if not game or game["status"] != "active":
+        return await call.answer("❌ Бой не активен", show_alert=True)
+    if uid not in (game["creator_id"], game["opponent_id"]):
+        return await call.answer("❌ Это не ваш бой", show_alert=True)
+
+    board = game["creator_move"] or "." * 9
+    turn = game["opponent_move"] or "X"  # "X" = ход creator, "O" = ход opponent
+
+    is_creator = uid == game["creator_id"]
+    # Проверяем чей ход
+    if is_creator and turn != "X":
+        return await call.answer("⏳ Ход оппонента!", show_alert=True)
+    if not is_creator and turn != "O":
+        return await call.answer("⏳ Ход создателя!", show_alert=True)
+
+    if cell < 0 or cell > 8 or board[cell] != ".":
+        return await call.answer("❌ Клетка занята!", show_alert=True)
+
+    # Ставим символ
+    sym = "X" if is_creator else "O"
+    board = board[:cell] + sym + board[cell + 1:]
+    next_turn = "O" if sym == "X" else "X"
+
+    # Сохраняем состояние
+    await set_pvp_move(game_id, game["creator_id"], board)
+    await set_pvp_move(game_id, game["opponent_id"], next_turn)
+    await call.answer("✅ Ход принят!")
+
+    winner = _ttt_check_winner(board)
+    gid = game_id
+    bet_str = fnum(game["bet"])
+
+    if winner:
+        # Игра окончена
+        board_text = _ttt_board_text(board)
+        if winner == "draw":
+            text = (
+                f"❌⭕ Бой #{gid}\n══════════════════════\n\n"
+                f"{board_text}\n\n"
+                f"🤝 НИЧЬЯ! Ставки возвращены.\n"
+                f"💰 Ставка: {bet_str} 💢"
+            )
+            await draw_pvp_game(gid)
+            await log_activity(game["creator_id"], "pvp", f"PvP #{gid} TTT ничья")
+            await log_activity(game["opponent_id"], "pvp", f"PvP #{gid} TTT ничья")
+            kb = pvp_menu_kb()
             try:
-                await bot.send_message(pid, draw_txt)
+                await call.message.edit_text(text, reply_markup=kb)
             except Exception:
                 pass
-        await _send_round_board(bot, game_id, gtype, rounds,
-                                cid, oid, bet, rnd, s1, s2)
+            try:
+                other_id = game["opponent_id"] if uid == game["creator_id"] else game["creator_id"]
+                await call.bot.send_message(other_id, text, reply_markup=kb)
+            except Exception:
+                pass
+        else:
+            # winner = "X" or "O"
+            winner_id = game["creator_id"] if winner == "X" else game["opponent_id"]
+            loser_id = game["opponent_id"] if winner == "X" else game["creator_id"]
+            prize = float(game["bet"]) * 2
+            await finish_pvp_game(gid, winner_id)
+            w_sym = "❌" if winner == "X" else "⭕"
+            text = (
+                f"❌⭕ Бой #{gid}\n══════════════════════\n\n"
+                f"{board_text}\n\n"
+                f"🎊 ПОБЕДИТЕЛЬ: {w_sym}!\n"
+                f"💰 Выигрыш: {fnum(prize)} 💢"
+            )
+            await log_activity(winner_id, "pvp", f"PvP #{gid} TTT победа +{prize}")
+            await log_activity(loser_id, "pvp", f"PvP #{gid} TTT поражение -{game['bet']}")
+            await create_transaction("pvp", winner_id, user2_id=loser_id, amount=prize,
+                                     details=f"Победа в PvP TTT #{gid}")
+            kb = pvp_menu_kb()
+            try:
+                await call.message.edit_text(text, reply_markup=kb)
+            except Exception:
+                pass
+            try:
+                other_id = game["opponent_id"] if uid == game["creator_id"] else game["creator_id"]
+                await call.bot.send_message(other_id, text, reply_markup=kb)
+            except Exception:
+                pass
+    else:
+        # Игра продолжается
+        turn_sym = "❌" if next_turn == "X" else "⭕"
+        text = (
+            f"❌⭕ Бой #{gid}\n══════════════════════\n\n"
+            f"{_ttt_board_text(board)}\n\n"
+            f"Ход: {turn_sym}\n"
+            f"💰 Ставка: {bet_str} 💢"
+        )
+        kb = pvp_ttt_kb(gid, board)
+        try:
+            await call.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        try:
+            other_id = game["opponent_id"] if uid == game["creator_id"] else game["creator_id"]
+            await call.bot.send_message(other_id, text, reply_markup=kb)
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════
+#  Финиш матча
+# ══════════════════════════════════════════
+async def _finish_game(call, game, cs, os_, text_prefix):
+    gid = game["id"]
+    bet = float(game["bet"])
+    creator_id = game["creator_id"]
+    opponent_id = game["opponent_id"]
+
+    if cs > os_:
+        winner_id = creator_id
+        loser_id = opponent_id
+        text_prefix += "\n🎊 ПОБЕДИТЕЛЬ: Игрок 1!"
+    elif os_ > cs:
+        winner_id = opponent_id
+        loser_id = creator_id
+        text_prefix += "\n🎊 ПОБЕДИТЕЛЬ: Игрок 2!"
+    else:
+        await draw_pvp_game(gid)
+        text_prefix += "\n🤝 ИТОГ: НИЧЬЯ! Ставки возвращены."
+        await log_activity(creator_id, "pvp", f"PvP #{gid} ничья {cs}-{os_}")
+        await log_activity(opponent_id, "pvp", f"PvP #{gid} ничья {cs}-{os_}")
+        kb = pvp_menu_kb()
+        try:
+            await call.message.edit_text(text_prefix, reply_markup=kb)
+        except Exception:
+            pass
+        try:
+            other_id = opponent_id if call.from_user.id == creator_id else creator_id
+            await call.bot.send_message(other_id, text_prefix, reply_markup=kb)
+        except Exception:
+            pass
         return
 
-    # ──── Есть победитель раунда ────
-    if winner == "creator":
-        s1 += 1
-    else:
-        s2 += 1
-
-    game_over = (s1 >= need or s2 >= need)
-
-    if game_over:
-        # ──── МАТЧ ОКОНЧЕН ────
-        if s1 > s2:
-            match_winner = cid
-        else:
-            match_winner = oid
-
-        await update_clicks(match_winner, total)
-
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute(
-                "UPDATE pvp_games SET status='done', winner_id=?, "
-                "creator_score=?, opponent_score=?, "
-                "creator_move=NULL, opponent_move=NULL WHERE id=?",
-                (match_winner, s1, s2, game_id),
-            )
-            await db.commit()
-
-        # Чек транзакции
-        loser_id = oid if match_winner == cid else cid
-        gname = _GAME_SHORT.get(gtype, gtype)
-        await create_transaction(
-            "pvp", match_winner, loser_id, float(total),
-            f"{gname} ∙ {s1}:{s2} ∙ Победа", ref_id=game_id,
-        )
-        await create_transaction(
-            "pvp", loser_id, match_winner, float(bet),
-            f"{gname} ∙ {s2 if loser_id == oid else s1}:{s1 if loser_id == oid else s2} ∙ Поражение",
-            ref_id=game_id,
-        )
-
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚔️ Ещё бой", callback_data="pvp_create")],
-            [InlineKeyboardButton(text="⬅️ В меню", callback_data="pvp_menu")],
-        ])
-
-        for pid in (cid, oid):
-            won = (pid == match_winner)
-            role = f"🏆 Вы победили! +{total:,} 💢" if won else "😞 Вы проиграли."
-
-            fin = hdr + "══════════════════════\n\n"
-            if rounds == 3:
-                fin += f"🏅 Итог: {s1} : {s2}\n"
-            fin += f"{role}\n\n══════════════════════"
-
-            try:
-                await bot.send_message(pid, fin, reply_markup=kb)
-            except Exception:
-                pass
-    else:
-        # ──── СЛЕДУЮЩИЙ РАУНД ────
-        new_rnd = rnd + 1
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute(
-                "UPDATE pvp_games SET round_num=?, creator_score=?, "
-                "opponent_score=?, creator_move=NULL, opponent_move=NULL "
-                "WHERE id=?",
-                (new_rnd, s1, s2, game_id),
-            )
-            await db.commit()
-
-        rw = "Игрок 1 ✅" if winner == "creator" else "Игрок 2 ✅"
-        mid = hdr + (
-            "══════════════════════\n\n"
-            f"✅ Раунд {rnd}: {rw}\n"
-            f"🏅 Счёт: {s1} : {s2}\n\n"
-            "Следующий раунд...\n\n"
-            "══════════════════════"
-        )
-        for pid in (cid, oid):
-            try:
-                await bot.send_message(pid, mid)
-            except Exception:
-                pass
-
-        await _send_round_board(bot, game_id, gtype, rounds,
-                                cid, oid, bet, new_rnd, s1, s2)
+    await finish_pvp_game(gid, winner_id)
+    prize = bet * 2
+    text_prefix += f"\n💰 Выигрыш: {fnum(prize)} 💢"
+    await log_activity(winner_id, "pvp", f"PvP #{gid} победа +{prize}")
+    await log_activity(loser_id, "pvp", f"PvP #{gid} поражение -{bet}")
+    await create_transaction("pvp", winner_id, user2_id=loser_id, amount=prize,
+                             details=f"Победа в PvP #{gid}")
+    kb = pvp_menu_kb()
+    try:
+        await call.message.edit_text(text_prefix, reply_markup=kb)
+    except Exception:
+        pass
+    try:
+        other_id = opponent_id if call.from_user.id == creator_id else creator_id
+        await call.bot.send_message(other_id, text_prefix, reply_markup=kb)
+    except Exception:
+        pass
 
 
-# ─── Определение победителя раунда по типу ───
-def _resolve_by_type(gtype: str, c_move: str, o_move: str):
-    """Возвращает (winner: str, moves_text: str)"""
-
-    if gtype == "rps":
-        txt = (
-            f"   Игрок 1: {_RPS_EMOJI[c_move]}\n"
-            f"   Игрок 2: {_RPS_EMOJI[o_move]}\n\n"
-        )
-        if c_move == o_move:
-            return "draw", txt
-        return ("creator" if _RPS_WINS[c_move] == o_move else "opponent"), txt
-
-    if gtype == "dice":
-        cn, on = int(c_move), int(o_move)
-        txt = (
-            f"   Игрок 1: {_DICE_FACE[cn]} → {cn}\n"
-            f"   Игрок 2: {_DICE_FACE[on]} → {on}\n\n"
-        )
-        if cn > on:
-            return "creator", txt
-        if on > cn:
-            return "opponent", txt
-        return "draw", txt
-
-    if gtype == "flip":
-        coin = random.choice(["eagle", "tails"])
-        txt = (
-            f"   Игрок 1: {_FLIP_EMOJI[c_move]}\n"
-            f"   Игрок 2: {_FLIP_EMOJI[o_move]}\n"
-            f"   🪙 Монета: {_FLIP_EMOJI[coin]}\n\n"
-        )
-        c_ok = (c_move == coin)
-        o_ok = (o_move == coin)
-        if c_ok and not o_ok:
-            return "creator", txt
-        if o_ok and not c_ok:
-            return "opponent", txt
-        return "draw", txt
-
-    # slots
-    c_disp = " ".join(c_move.split("|"))
-    o_disp = " ".join(o_move.split("|"))
-    c_sc = _slot_score(c_move)
-    o_sc = _slot_score(o_move)
-    txt = (
-        f"   Игрок 1: {c_disp}\n"
-        f"   Игрок 2: {o_disp}\n\n"
-    )
-    if c_sc > o_sc:
-        return "creator", txt
-    if o_sc > c_sc:
-        return "opponent", txt
-    return "draw", txt
-
-
-def _slot_score(move: str) -> int:
-    """3 одинаковых → 3, пара → 2, все разные → 1."""
-    parts = move.split("|")
-    unique = len(set(parts))
-    if unique == 1:
-        return 3
-    if unique == 2:
-        return 2
-    return 1
-
-
-# ════════════════════════════════════════════════════════════
-#  📊 ИСТОРИЯ БОЁВ
-# ════════════════════════════════════════════════════════════
+# ── История боёв ──
 @router.callback_query(F.data == "pvp_history")
 async def pvp_history(call: CallbackQuery):
     uid = call.from_user.id
+    await set_user_online(uid)
 
-    async with aiosqlite.connect(DB_NAME) as db:
-        cur = await db.execute(
-            "SELECT id, creator_id, opponent_id, bet, game_type, "
-            "status, winner_id, rounds, creator_score, opponent_score "
-            "FROM pvp_games "
-            "WHERE (creator_id=? OR opponent_id=?) AND status IN ('done','draw') "
-            "ORDER BY id DESC LIMIT 10",
-            (uid, uid),
-        )
-        games = await cur.fetchall()
+    # Открытые бои пользователя (ожидают оппонента)
+    all_open = await get_open_pvp_games()
+    my_open = [g for g in all_open if g[1] == uid]  # creator_id == uid
 
-        cur2 = await db.execute(
-            "SELECT "
-            "COUNT(*), "
-            "SUM(CASE WHEN winner_id=? THEN 1 ELSE 0 END), "
-            "SUM(CASE WHEN status='draw' THEN 1 ELSE 0 END), "
-            "SUM(CASE WHEN winner_id IS NOT NULL AND winner_id!=? "
-            "AND status='done' THEN 1 ELSE 0 END) "
-            "FROM pvp_games "
-            "WHERE (creator_id=? OR opponent_id=?) AND status IN ('done','draw')",
-            (uid, uid, uid, uid),
-        )
-        stats = await cur2.fetchone()
+    history = await get_user_pvp_history(uid)
 
-    total  = stats[0] or 0
-    wins   = stats[1] or 0
-    draws  = stats[2] or 0
-    losses = stats[3] or 0
-    wr = (wins / total * 100) if total > 0 else 0
+    if not my_open and not history:
+        text = "📊 У вас ещё нет боёв."
+        await call.message.edit_text(text, reply_markup=pvp_menu_kb())
+        return await call.answer()
 
-    text = (
-        "📊 МОИ БОИ\n"
-        "══════════════════════\n\n"
-        f"┠📈 Всего: {total}\n"
-        f"┠🏆 Побед: {wins}\n"
-        f"┠🤝 Ничьих: {draws}\n"
-        f"┠😞 Поражений: {losses}\n"
-        f"┗📊 Винрейт: {wr:.1f}%\n\n"
-    )
+    lines = ["📊 МОИ БОИ\n══════════════════════\n"]
+    kb_rows = []
 
-    if games:
-        text += "ПОСЛЕДНИЕ БОИ:\n══════════════════════\n\n"
-        for gid, cid_g, oid_g, bet_g, gt, st, w, rnds, cs, os_ in games:
-            icon = _GAME_SHORT.get(gt, "❓")
-            if st == "draw":
-                r = "🤝"
-            elif w == uid:
-                r = "🏆"
+    # Открытые бои
+    if my_open:
+        lines.append("⏳ <b>Ожидают оппонента:</b>")
+        for g in my_open[:5]:
+            gid, cid, bet, gtype, rounds = g
+            type_name = _type_name(gtype)
+            lines.append(f"#{gid} │ {type_name} x{rounds} │ {fnum(bet)}💢")
+            kb_rows.append([InlineKeyboardButton(
+                text=f"❌ Отменить бой #{gid}",
+                callback_data=f"pvp_cancel_{gid}",
+            )])
+        lines.append("")
+
+    # Завершённые бои
+    if history:
+        lines.append("📋 <b>Завершённые:</b>")
+        for g in history:
+            gid, cid, oid, bet, gtype, status, winner, rounds = g
+            type_name = _type_name(gtype)
+            if status == "draw":
+                result = "🤝 Ничья"
+            elif winner == uid:
+                result = "✅ Победа"
             else:
-                r = "😞"
-            bo = "Bo3" if (rnds or 1) == 3 else "Bo1"
-            sc = f" ({cs or 0}:{os_ or 0})" if (rnds or 1) == 3 else ""
-            text += f"┠{r} #{gid} │ {icon} │ {int(bet_g):,} 💢 │ {bo}{sc}\n"
-        text += "\n"
+                result = "❌ Проигрыш"
+            lines.append(f"#{gid} │ {type_name} x{rounds} │ {fnum(bet)}💢 │ {result}")
 
-    text += "══════════════════════"
+    # Кнопки отмены + меню PvP
+    kb_rows.append([InlineKeyboardButton(text="🔍 Найти", callback_data="pvp_find"),
+                     InlineKeyboardButton(text="⚔️ Создать", callback_data="pvp_create")])
+    kb_rows.append([InlineKeyboardButton(text="⬅️ Мини-игры", callback_data="minigames_menu")])
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚔️ Создать бой", callback_data="pvp_create")],
-        [InlineKeyboardButton(text="🔍 Найти бои", callback_data="pvp_find")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="pvp_menu")],
-    ])
-    await call.message.edit_text(text, reply_markup=kb)
+    await call.message.edit_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await call.answer()
+
+
+# ── Отмена боя ──
+@router.callback_query(F.data.startswith("pvp_cancel_"))
+async def pvp_cancel(call: CallbackQuery):
+    uid = call.from_user.id
+    game_id = int(call.data.split("_")[2])
+    game = await get_pvp_game(game_id)
+    if not game or game["creator_id"] != uid or game["status"] != "open":
+        return await call.answer("⚠️ Бой не найден или уже начат.", show_alert=True)
+    await cancel_pvp_game(game_id)
+    await call.answer("✅ Бой отменён, ставка возвращена.", show_alert=True)
+    # Обновить список
+    await pvp_history(call)
+
+
+# ── noop ──
+@router.callback_query(F.data == "noop")
+async def noop(call: CallbackQuery):
     await call.answer()

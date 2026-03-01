@@ -1,170 +1,296 @@
 # ======================================================
-# КЛАВИАТУРЫ — КликТохн v1.0.0
+# КЛАВИАТУРЫ — КликТохн v1.0.1  ·  Premium UI
 # ======================================================
-
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from config import NFT_RARITY_EMOJI
 
 
-# ──────────── СТАРТ ────────────
+def _rarity_emoji(rarity_name: str) -> str:
+    return NFT_RARITY_EMOJI.get(rarity_name, "🟢")
+
+
+# ━━━━━━━━━━━━  СТАРТ  ━━━━━━━━━━━━
 def start_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Начать ⏺️", callback_data="open_menu")]
+        [InlineKeyboardButton(text="🚀 Начать игру", callback_data="open_menu")],
     ])
 
 
-# ──────────── ГЛАВНОЕ МЕНЮ (2 страницы) ────────────
+# ━━━━━━━━━━━━  ГЛАВНОЕ МЕНЮ (2 стр.)  ━━━━━━━━━━━━
 def main_menu_kb(page: int = 0):
     if page == 0:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💢 Начать клик", callback_data="click_menu")],
-            [InlineKeyboardButton(text="💵 Взять доход", callback_data="claim_income")],
-            [InlineKeyboardButton(text="🔗 Пригласить", callback_data="ref_menu")],
-            [InlineKeyboardButton(text="💸 Магазин", callback_data="shop_menu")],
-            [InlineKeyboardButton(text="🏆 Рейтинг", callback_data="rating_menu")],
-            [InlineKeyboardButton(text="Далее ▶️", callback_data="menu_page:1")],
+            [InlineKeyboardButton(text="💢 Клик", callback_data="click_menu")],
+            [
+                InlineKeyboardButton(text="🎨 Мои НФТ", callback_data="my_nft"),
+                InlineKeyboardButton(text="💸 Магазин", callback_data="shop_menu"),
+            ],
+            [
+                InlineKeyboardButton(text="🎮 Мини-игры", callback_data="minigames_menu"),
+                InlineKeyboardButton(text="🔗 Пригласить", callback_data="ref_menu"),
+            ],
+            [InlineKeyboardButton(text="▶️ Ещё", callback_data="menu_page:1")],
         ])
     else:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🎨 Мои НФТ", callback_data="my_nft")],
-            [InlineKeyboardButton(text="💬 Случайный CHAT", callback_data="chat_menu")],
-            [InlineKeyboardButton(text="⚔️ PvP игроков", callback_data="pvp_menu")],
-            [InlineKeyboardButton(text="📋 История / Чеки", callback_data="history_menu")],
-            [InlineKeyboardButton(text="⚠️ Поддержка", callback_data="support_menu")],
+            [
+                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="rating_menu"),
+                InlineKeyboardButton(text="⚠️ Поддержка", callback_data="support_menu"),
+            ],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_page:0")],
         ])
 
 
-# ──────────── 1. КЛИК ТОХН ────────────
+# ━━━━━━━━━━━━  КЛИК / ДОХОД  ━━━━━━━━━━━━
 def click_zone_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💢 Тапнуть", callback_data="tap")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [
+            InlineKeyboardButton(text="💵 Доход", callback_data="claim_income"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="menu"),
+        ],
     ])
-
-
-# ──────────── 2. ПРИГЛАСИТЬ ────────────
-def referral_kb(ref_link: str):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="📢 Пригласить",
-            url=f"https://t.me/share/url?url={ref_link}&text=Присоединяйся к КликТохн!"
-        )],
-        [InlineKeyboardButton(text="🎁 Приз", callback_data="prize_menu")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
-    ])
-
-
-# ──────────── 3. МАГАЗИН ────────────
-def shop_menu_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔨 Улучшение клика", callback_data="shop_upg")],
-        [InlineKeyboardButton(text="📈 Пассивный доход", callback_data="shop_pas")],
-        [InlineKeyboardButton(text="📦 Ёмкость дохода", callback_data="shop_cap")],
-        [InlineKeyboardButton(text="🏪 Торговая площадка", callback_data="market_menu")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
-    ])
-
-
-def shop_upg_kb():
-    from config import SHOP_CLICK
-    kb = []
-    for i, (key, (bonus, price)) in enumerate(SHOP_CLICK.items(), 1):
-        kb.append([InlineKeyboardButton(
-            text=f"#{i} │ +{bonus} к клику │ {int(price)} 💢",
-            callback_data=f"buy_c_{key}",
-        )])
-    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-
-def shop_pas_kb():
-    from config import SHOP_PASSIVE
-    kb = []
-    for i, (key, (bonus, price)) in enumerate(SHOP_PASSIVE.items(), 1):
-        kb.append([InlineKeyboardButton(
-            text=f"#{i} │ +{bonus}/час │ {int(price)} 💢",
-            callback_data=f"buy_p_{key}",
-        )])
-    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-
-def shop_cap_kb():
-    from config import SHOP_CAPACITY
-    kb = []
-    for i, (key, (bonus, price)) in enumerate(SHOP_CAPACITY.items(), 1):
-        kb.append([InlineKeyboardButton(
-            text=f"#{i} │ +{bonus} ёмкость │ {int(price)} 💢",
-            callback_data=f"buy_cap_{key}",
-        )])
-    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 def income_kb():
-    """Keyboard for income screen: Claim + Menu."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Взять", callback_data="do_claim_income")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [InlineKeyboardButton(text="💰 Собрать доход", callback_data="do_claim_income")],
+        [
+            InlineKeyboardButton(text="💢 К клику", callback_data="click_menu"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="menu"),
+        ],
     ])
 
 
-# ──────────── 4. РЕЙТИНГ ────────────
+# ━━━━━━━━━━━━  ПРИГЛАСИТЬ  ━━━━━━━━━━━━
+def referral_kb(ref_link: str):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📢 Поделиться ссылкой",
+            url=f"https://t.me/share/url?url={ref_link}&text=Присоединяйся к КликТохн!"
+        )],
+        [InlineKeyboardButton(text="🎁 Получить приз", callback_data="prize_menu")],
+        [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
+    ])
+
+
+# ━━━━━━━━━━━━  МАГАЗИН  ━━━━━━━━━━━━
+def shop_menu_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔨 Клик", callback_data="shop_upg"),
+            InlineKeyboardButton(text="📈 Доход", callback_data="shop_pas"),
+        ],
+        [
+            InlineKeyboardButton(text="📦 Ёмкость", callback_data="shop_cap"),
+            InlineKeyboardButton(text="🔓 Слоты НФТ", callback_data="shop_nft_slot"),
+        ],
+        [InlineKeyboardButton(text="🏪 Торговая площадка", callback_data="market_menu")],
+        [InlineKeyboardButton(text="💳 Оплата (Сбербанк)", callback_data="payment_menu")],
+        [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
+    ])
+
+
+def shop_upg_kb(user_clicks: float = 0):
+    from config import SHOP_CLICK
+    kb = []
+    for i, (key, (bonus, price)) in enumerate(SHOP_CLICK.items(), 1):
+        mark = "✅" if user_clicks >= price else "❌"
+        kb.append([InlineKeyboardButton(
+            text=f"{mark} #{i}  ·  +{bonus} клик  ·  {int(price):,} 💢".replace(",", "."),
+            callback_data=f"buy_c_{key}",
+        )])
+    kb.append([InlineKeyboardButton(text="⬅️ Магазин", callback_data="shop_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def shop_pas_kb(user_clicks: float = 0):
+    from config import SHOP_PASSIVE
+    kb = []
+    for i, (key, (bonus, price)) in enumerate(SHOP_PASSIVE.items(), 1):
+        mark = "✅" if user_clicks >= price else "❌"
+        kb.append([InlineKeyboardButton(
+            text=f"{mark} #{i}  ·  +{bonus}/ч  ·  {int(price):,} 💢".replace(",", "."),
+            callback_data=f"buy_p_{key}",
+        )])
+    kb.append([InlineKeyboardButton(text="⬅️ Магазин", callback_data="shop_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def shop_cap_kb(user_clicks: float = 0):
+    from config import SHOP_CAPACITY
+    kb = []
+    for i, (key, (bonus, price)) in enumerate(SHOP_CAPACITY.items(), 1):
+        mark = "✅" if user_clicks >= price else "❌"
+        kb.append([InlineKeyboardButton(
+            text=f"{mark} #{i}  ·  +{bonus} ёмк.  ·  {int(price):,} 💢".replace(",", "."),
+            callback_data=f"buy_cap_{key}",
+        )])
+    kb.append([InlineKeyboardButton(text="⬅️ Магазин", callback_data="shop_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def shop_nft_slot_kb(user_clicks: float = 0):
+    from config import SHOP_NFT_SLOT
+    kb = []
+    for i, (key, (bonus, price)) in enumerate(SHOP_NFT_SLOT.items(), 1):
+        mark = "✅" if user_clicks >= price else "❌"
+        kb.append([InlineKeyboardButton(
+            text=f"{mark} #{i}  ·  +{bonus} слот  ·  {int(price):,} 💢".replace(",", "."),
+            callback_data=f"buy_slot_{key}",
+        )])
+    kb.append([InlineKeyboardButton(text="⬅️ Магазин", callback_data="shop_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# ━━━━━━━━━━━━  ОПЛАТА  ━━━━━━━━━━━━
+def payment_menu_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💢 Купить Тохн", callback_data="pay_clicks_menu")],
+        [InlineKeyboardButton(text="⭐ VIP / 💎 Premium", callback_data="pay_vip_menu")],
+        [InlineKeyboardButton(text="📦 Мои заказы", callback_data="my_orders:0")],
+        [InlineKeyboardButton(text="⬅️ Магазин", callback_data="shop_menu")],
+    ])
+
+
+def pay_clicks_packages_kb():
+    from config import CLICK_PACKAGES
+    kb = []
+    for key, (clicks, price_rub, label) in CLICK_PACKAGES.items():
+        kb.append([InlineKeyboardButton(text=label, callback_data=f"buy_pkg:{key}")])
+    kb.append([InlineKeyboardButton(text="⬅️ Оплата", callback_data="payment_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def pay_vip_packages_kb():
+    from config import VIP_PACKAGES
+    kb = []
+    for key, (mc, mi, dur, price_rub, label) in VIP_PACKAGES.items():
+        kb.append([InlineKeyboardButton(text=label, callback_data=f"buy_vip:{key}")])
+    kb.append([InlineKeyboardButton(text="⬅️ Оплата", callback_data="payment_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def pay_order_pending_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📦 Мои заказы", callback_data="my_orders:0")],
+        [InlineKeyboardButton(text="⬅️ Магазин", callback_data="shop_menu")],
+    ])
+
+
+def owner_orders_kb(orders, page, total_pages, prefix="owner"):
+    panel_cb = "owner_panel" if prefix == "owner" else "admin_panel"
+    orders_cb = f"{prefix}_orders" if prefix != "owner" else "owner_orders"
+    view_cb = f"{prefix}_order_view" if prefix != "owner" else "order_view"
+    kb = []
+    for o in orders:
+        oid, uid, ptype, pid, method, rub, status, dt = o
+        short_dt = dt[:10] if dt else ""
+        st = "🟡" if status == "pending" else ("✅" if status == "approved" else "🔴")
+        kb.append([InlineKeyboardButton(
+            text=f"{st} #{oid} │ {uid} │ {rub}₽ │ {short_dt}",
+            callback_data=f"{view_cb}:{oid}",
+        )])
+    nav = []
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{orders_cb}:{page-1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{orders_cb}:{page+1}"))
+    if nav:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data=panel_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def order_action_kb(order_id: int, prefix="owner"):
+    p = f"{prefix}_order" if prefix != "owner" else "order"
+    orders_cb = f"{prefix}_orders" if prefix != "owner" else "owner_orders"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"{p}_approve:{order_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"{p}_reject:{order_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="💬 Написать", callback_data=f"{p}_msg:{order_id}"),
+            InlineKeyboardButton(text="🚫 Фейк", callback_data=f"{p}_fake:{order_id}"),
+        ],
+        [InlineKeyboardButton(text="⬅️ К заказам", callback_data=f"{orders_cb}:0")],
+    ])
+
+
+# ━━━━━━━━━━━━  МИНИ-ИГРЫ  ━━━━━━━━━━━━
+def minigames_menu_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚔️ PvP", callback_data="pvp_menu"),
+            InlineKeyboardButton(text="💬 Чат", callback_data="chat_menu"),
+        ],
+        [InlineKeyboardButton(text="🎪 Аукционы", callback_data="auc_list")],
+        [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
+    ])
+
+
+# ━━━━━━━━━━━━  РЕЙТИНГ  ━━━━━━━━━━━━
 def rating_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏆 Топ - 50 Игроков", callback_data="top_50")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [InlineKeyboardButton(text="🥇 Топ 1—3", callback_data="top_range:0")],
+        [InlineKeyboardButton(text="🥈 Топ 4—6", callback_data="top_range:1")],
+        [InlineKeyboardButton(text="🥉 Топ 7—9", callback_data="top_range:2")],
+        [InlineKeyboardButton(text="🏅 Топ 10—12", callback_data="top_range:3")],
+        [InlineKeyboardButton(text="⭐ Топ 13—15", callback_data="top_range:4")],
+        [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
     ])
 
 
-# ──────────── 5. СЛУЧАЙНЫЙ CHAT ────────────
+# ━━━━━━━━━━━━  СЛУЧАЙНЫЙ ЧАТ  ━━━━━━━━━━━━
 def chat_menu_kb():
-    """Главное меню чата — НЕТ кнопки остановить."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Найти собеседника", callback_data="chat_search")],
         [InlineKeyboardButton(text="📋 Мои чаты", callback_data="chat_list")],
-        [InlineKeyboardButton(text="📜 История", callback_data="chat_history")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [InlineKeyboardButton(text="⬅️ Мини-игры", callback_data="minigames_menu")],
     ])
 
 
 def chat_confirm_search_kb():
-    """Подтверждение оплаты поиска собеседника."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Да, искать (-50 💢)", callback_data="chat_search_confirm")],
+        [InlineKeyboardButton(text="✅ Искать (−50 💢)", callback_data="chat_search_confirm")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="chat_menu")],
     ])
 
 
 def chat_searching_kb():
-    """Клавиатура во время поиска."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏹ Остановить поиск", callback_data="chat_stop_search")],
     ])
 
 
 def chat_active_kb():
-    """Клавиатура активного чата."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔇 Завершить чат", callback_data="chat_end")],
-        [InlineKeyboardButton(text="🔍 Новый собеседник", callback_data="chat_next")],
+        [
+            InlineKeyboardButton(text="🔇 Завершить", callback_data="chat_end"),
+            InlineKeyboardButton(text="🔍 Следующий", callback_data="chat_next"),
+        ],
     ])
 
 
 def chat_ended_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Искать снова", callback_data="chat_search")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
     ])
 
 
-# ──────────── 6. PvP ────────────
+# ━━━━━━━━━━━━  PvP  ━━━━━━━━━━━━
 def pvp_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Найти бои", callback_data="pvp_find")],
-        [InlineKeyboardButton(text="⚔️ Создать бой", callback_data="pvp_create")],
+        [
+            InlineKeyboardButton(text="🔍 Найти", callback_data="pvp_find"),
+            InlineKeyboardButton(text="⚔️ Создать", callback_data="pvp_create"),
+        ],
         [InlineKeyboardButton(text="📊 Мои бои", callback_data="pvp_history")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [InlineKeyboardButton(text="⬅️ Мини-игры", callback_data="minigames_menu")],
     ])
 
 
@@ -178,7 +304,22 @@ def pvp_create_type_kb():
             InlineKeyboardButton(text="🪙 Монетка", callback_data="pvp_type_flip"),
             InlineKeyboardButton(text="🎰 Слоты", callback_data="pvp_type_slots"),
         ],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="pvp_menu")],
+        [InlineKeyboardButton(text="❌⭕ Крестики-Нолики", callback_data="pvp_type_ttt")],
+        [InlineKeyboardButton(text="⬅️ PvP", callback_data="pvp_menu")],
+    ])
+
+
+def pvp_rounds_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="1️⃣ 1 раунд", callback_data="pvp_rounds_1"),
+            InlineKeyboardButton(text="2️⃣ 2 раунда", callback_data="pvp_rounds_2"),
+        ],
+        [
+            InlineKeyboardButton(text="3️⃣ 3 раунда", callback_data="pvp_rounds_3"),
+            InlineKeyboardButton(text="4️⃣ 4 раунда", callback_data="pvp_rounds_4"),
+        ],
+        [InlineKeyboardButton(text="⬅️ PvP", callback_data="pvp_create")],
     ])
 
 
@@ -189,11 +330,11 @@ def pvp_bet_kb():
             InlineKeyboardButton(text="500 💢", callback_data="pvp_bet_500"),
         ],
         [
-            InlineKeyboardButton(text="1000 💢", callback_data="pvp_bet_1000"),
-            InlineKeyboardButton(text="5000 💢", callback_data="pvp_bet_5000"),
+            InlineKeyboardButton(text="1 000 💢", callback_data="pvp_bet_1000"),
+            InlineKeyboardButton(text="5 000 💢", callback_data="pvp_bet_5000"),
         ],
         [InlineKeyboardButton(text="✏️ Своя сумма", callback_data="pvp_bet_custom")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="pvp_create")],
+        [InlineKeyboardButton(text="⬅️ PvP", callback_data="pvp_create")],
     ])
 
 
@@ -204,16 +345,6 @@ def pvp_rps_kb(game_id: int):
             InlineKeyboardButton(text="✂️ Ножницы", callback_data=f"rps_{game_id}_scissors"),
             InlineKeyboardButton(text="📄 Бумага", callback_data=f"rps_{game_id}_paper"),
         ],
-    ])
-
-
-def pvp_rounds_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="1️⃣ Bo1 (1 раунд)", callback_data="pvp_rounds_1"),
-            InlineKeyboardButton(text="3️⃣ Bo3 (до 2 побед)", callback_data="pvp_rounds_3"),
-        ],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="pvp_create")],
     ])
 
 
@@ -234,68 +365,77 @@ def pvp_flip_kb(game_id: int):
 
 def pvp_slots_kb(game_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎰 Крутить барабан", callback_data=f"slots_{game_id}_spin")],
+        [InlineKeyboardButton(text="🎰 Крутить", callback_data=f"slots_{game_id}_spin")],
     ])
 
 
-# ──────────── 7. ПОДДЕРЖКА ────────────
+def pvp_ttt_kb(game_id: int, board: str = "." * 9):
+    """Клавиатура 3×3 для крестиков-ноликов. board — строка из 9 символов: '.', 'X', 'O'."""
+    _sym = {"X": "❌", "O": "⭕", ".": "⬜"}
+    rows = []
+    for r in range(3):
+        row = []
+        for c in range(3):
+            idx = r * 3 + c
+            ch = board[idx]
+            if ch == ".":
+                row.append(InlineKeyboardButton(text="⬜", callback_data=f"ttt_{game_id}_{idx}"))
+            else:
+                row.append(InlineKeyboardButton(text=_sym[ch], callback_data="noop"))
+        rows.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ━━━━━━━━━━━━  ПОДДЕРЖКА  ━━━━━━━━━━━━
 def support_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚩 Жалоба", callback_data="support_complaint")],
-        [InlineKeyboardButton(text="🐛 Проблема / Баг", callback_data="support_problem")],
+        [
+            InlineKeyboardButton(text="🚩 Жалоба", callback_data="support_complaint"),
+            InlineKeyboardButton(text="🐛 Баг", callback_data="support_problem"),
+        ],
         [InlineKeyboardButton(text="📨 Мои обращения", callback_data="support_my_tickets")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [InlineKeyboardButton(text="📋 История / Чеки", callback_data="history_menu")],
+        [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
     ])
 
 
 def back_support_kb():
-    """Назад в меню поддержки."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Поддержка", callback_data="support_menu")],
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="menu")],
+        [
+            InlineKeyboardButton(text="⬅️ Поддержка", callback_data="support_menu"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="menu"),
+        ],
     ])
 
 
 def back_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
     ])
 
 
-# ──────────── УТИЛИТЫ ────────────
-def _rarity_emoji(rarity: int) -> str:
-    """Текстовый уровень редкости (1-5)."""
-    return {
-        1: "🔴 Легендарный",
-        2: "🟠 Эпический",
-        3: "🟣 Редкий",
-        4: "🔵 Необычный",
-        5: "🟢 Обычный",
-    }.get(rarity, "🟢 Обычный")
-
-
-# ──────────── 8. МОИ НФТ ────────────
+# ━━━━━━━━━━━━  МОИ НФТ  ━━━━━━━━━━━━
 def my_nft_kb(user_nfts: list, max_nft: int = 5):
-    """Клавиатура со списком НФТ пользователя + пустые слоты."""
     kb = []
-    for idx, (un_id, name, income, rarity, bought, dt) in enumerate(user_nfts, 1):
-        label = _rarity_emoji(rarity)
+    for idx, nft in enumerate(user_nfts, 1):
+        un_id = nft[0]
+        name = nft[1]
+        rarity_name = nft[4] if len(nft) > 4 else "Обычный"
+        emoji = _rarity_emoji(rarity_name)
         kb.append([InlineKeyboardButton(
-            text=f"#{idx} {label} ∙ {name}",
+            text=f"#{idx} {emoji} {rarity_name}  ·  {name}",
             callback_data=f"nft_info_{un_id}",
         )])
-    # Пустые слоты
     for i in range(len(user_nfts) + 1, max_nft + 1):
         kb.append([InlineKeyboardButton(
-            text=f"#{i} ── пусто ──",
+            text=f"#{i}  ── пусто ──",
             callback_data="noop",
         )])
-    kb.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")])
+    kb.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def nft_detail_kb(user_nft_id: int, on_sale: bool = False):
-    """Детали конкретного НФТ — кнопки продать / обменять."""
+def nft_detail_kb(user_nft_id: int, on_sale: bool = False, is_pinned: bool = False):
     kb = []
     if on_sale:
         kb.append([InlineKeyboardButton(text="🚫 Снять с продажи", callback_data=f"nft_unsell_{user_nft_id}")])
@@ -304,188 +444,524 @@ def nft_detail_kb(user_nft_id: int, on_sale: bool = False):
             InlineKeyboardButton(text="💰 Продать", callback_data=f"nft_sell_{user_nft_id}"),
             InlineKeyboardButton(text="🔄 Обменять", callback_data=f"nft_trade_{user_nft_id}"),
         ])
-    kb.append([InlineKeyboardButton(text="⬅️ Назад к НФТ", callback_data="my_nft")])
+        kb.append([InlineKeyboardButton(text="🗑 Удалить (3.500 💢)", callback_data=f"nft_delete_{user_nft_id}")])
+    # Pin / Unpin
+    if is_pinned:
+        kb.append([InlineKeyboardButton(text="📌 Открепить", callback_data=f"nft_unpin_{user_nft_id}")])
+    else:
+        kb.append([InlineKeyboardButton(text="📌 Закрепить в профиле", callback_data=f"nft_pin_{user_nft_id}")])
+    kb.append([InlineKeyboardButton(text="⬅️ Мои НФТ", callback_data="my_nft")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 def nft_sell_confirm_kb(user_nft_id: int):
-    """Подтверждение продажи."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Да, выставить", callback_data=f"nft_sell_yes_{user_nft_id}")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="my_nft")],
+        [
+            InlineKeyboardButton(text="✅ Выставить", callback_data=f"nft_sell_yes_{user_nft_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="my_nft"),
+        ],
     ])
 
 
-# ──────────── 9. ТОРГОВАЯ ПЛОЩАДКА (НФТ ПРОДАЖИ) ────────────
-def nft_marketplace_kb(items: list, page: int, total_pages: int):
-    """Пагинированная клавиатура торговой площадки НФТ."""
-    kb = []
-    for item in items:
-        item_type, item_id, name, rarity, income, price, seller_id = item
-        label = _rarity_emoji(rarity)
-        icon = "🛒" if item_type == 'tpl' else "👤"
-        cb = f"nftv_{item_type}_{item_id}"
-        kb.append([InlineKeyboardButton(
-            text=f"{icon} {label} ∙ {name}",
-            callback_data=cb,
-        )])
-    # Навигация
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀", callback_data=f"nftp_{page - 1}"))
-    nav.append(InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="▶", callback_data=f"nftp_{page + 1}"))
-    if total_pages > 0:
-        kb.append(nav)
-    kb.append([InlineKeyboardButton(text="⬅️ В магазин", callback_data="shop_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-
-def nft_buy_confirm_kb(item_type: str, item_id: int):
-    """Кнопки подтверждения покупки НФТ."""
+def nft_delete_confirm_kb(user_nft_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Да, купить", callback_data=f"nftb_{item_type}_{item_id}")],
-        [InlineKeyboardButton(text="❌ Нет", callback_data="nftp_0")],
+        [
+            InlineKeyboardButton(text="✅ Удалить", callback_data=f"nft_del_yes_{user_nft_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="my_nft"),
+        ],
     ])
 
 
+# ━━━━━━━━━━━━  ТОРГОВАЯ ПЛОЩАДКА  ━━━━━━━━━━━━
 def market_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛍 НФТ Продажи", callback_data="nftp_0")],
         [InlineKeyboardButton(text="🔄 Обмен НФТ", callback_data="trade_menu")],
-        [InlineKeyboardButton(text="⬅️ В магазин", callback_data="shop_menu")],
+        [InlineKeyboardButton(text="⬅️ Магазин", callback_data="shop_menu")],
     ])
 
 
-# ──────────── 10. ПАНЕЛЬ ВЛАДЕЛЬЦА (2 страницы) ────────────
+def nft_marketplace_kb(items: list, page: int, total_pages: int):
+    kb = []
+    for item in items:
+        listing_id = item[0]
+        name = item[5]
+        rarity_name = item[6]
+        rarity_pct = item[7]
+        price = item[4]
+        income = item[8]
+        emoji = _rarity_emoji(rarity_name)
+        kb.append([InlineKeyboardButton(
+            text=f"{emoji} {name}  \u00b7  {rarity_name} ({rarity_pct}%)",
+            callback_data=f"nftv_market_{listing_id}",
+        )])
+        kb.append([InlineKeyboardButton(
+            text=f"   \ud83d\udcb0 {int(price):,} \ud83d\udca2  \u00b7  +{income}/\u0447".replace(",", "."),
+            callback_data=f"nftv_market_{listing_id}",
+        )])
+    nav = []
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="⏮", callback_data="nftp_0"))
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"nftp_{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"nftp_{page + 1}"))
+            nav.append(InlineKeyboardButton(text="⏭", callback_data=f"nftp_{total_pages - 1}"))
+        kb.append(nav)
+    kb.append([InlineKeyboardButton(text="⬅️ Площадка", callback_data="market_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def nft_buy_confirm_kb(listing_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Купить", callback_data=f"nftb_market_{listing_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="nftp_0"),
+        ],
+    ])
+
+
+# ━━━━━━━━━━━━  ОБМЕН НФТ  ━━━━━━━━━━━━
+def trade_menu_kb(trades: list, page: int, total_pages: int):
+    kb = []
+    for trade in trades:
+        trade_id = trade[0]
+        sender_id = trade[1]
+        want_clicks = trade[2]
+        kb.append([InlineKeyboardButton(
+            text=f"🔄 #{trade_id}  ·  Хочет: {int(want_clicks):,} 💢".replace(",", "."),
+            callback_data=f"trade_view_{trade_id}",
+        )])
+    nav = []
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"trades_pg_{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"trades_pg_{page + 1}"))
+        kb.append(nav)
+    kb.append([
+        InlineKeyboardButton(text="📥 Входящие", callback_data="trade_incoming"),
+        InlineKeyboardButton(text="❌ Отменить мои", callback_data="trade_cancel_mine"),
+    ])
+    kb.append([InlineKeyboardButton(text="⬅️ Площадка", callback_data="market_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ПАНЕЛЬ ВЛАДЕЛЬЦА  (3 страницы)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def owner_panel_kb(page: int = 0):
-    """Панель владельца, разделённая на 2 страницы с навигацией ◀ ▶."""
     if page == 0:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📊 Статистика", callback_data="owner_stats")],
-            [InlineKeyboardButton(text="👥 Участники", callback_data="owner_users")],
+            [
+                InlineKeyboardButton(text="👥 Участники", callback_data="owner_users"),
+                InlineKeyboardButton(text="🚫 Забаненные", callback_data="owner_banned:0"),
+            ],
             [
                 InlineKeyboardButton(text="🔨 Бан", callback_data="owner_ban"),
                 InlineKeyboardButton(text="✅ Разбан", callback_data="owner_unban"),
             ],
-            [InlineKeyboardButton(text="🚫 Список забаненных", callback_data="owner_banned_list")],
-            [InlineKeyboardButton(text="👀 Переписки", callback_data="owner_chat_logs")],
-            [InlineKeyboardButton(text="📋 Тикеты / Жалобы", callback_data="owner_tickets")],
-            [InlineKeyboardButton(text="📨 Жалобы на чеки", callback_data="compl_pg:0")],
+            [InlineKeyboardButton(text="💬 Переписки", callback_data="owner_chat_logs")],
             [
                 InlineKeyboardButton(text="▶️ Далее", callback_data="owner_panel_page:1"),
-                InlineKeyboardButton(text="⬅️ Выход", callback_data="menu"),
+                InlineKeyboardButton(text="🏠 Выход", callback_data="menu"),
+            ],
+        ])
+    elif page == 1:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📋 Тикеты", callback_data="owner_tickets:0"),
+                InlineKeyboardButton(text="📨 Жалобы", callback_data="compl_pg:0"),
+            ],
+            [InlineKeyboardButton(text="💳 Заказы оплаты", callback_data="owner_orders:0")],
+            [
+                InlineKeyboardButton(text="📢 Рассылка", callback_data="owner_broadcast"),
+                InlineKeyboardButton(text="📝 Логи", callback_data="owner_logs"),
+            ],
+            [
+                InlineKeyboardButton(text="◀️", callback_data="owner_panel_page:0"),
+                InlineKeyboardButton(text="▶️", callback_data="owner_panel_page:2"),
             ],
         ])
     else:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💰 Выдать клики", callback_data="owner_give")],
-            [InlineKeyboardButton(text="📢 Рассылка", callback_data="owner_broadcast")],
             [
                 InlineKeyboardButton(text="🎨 Создать НФТ", callback_data="owner_nft_create"),
+                InlineKeyboardButton(text="⚡ Быстрое НФТ", callback_data="owner_quick_nft"),
+            ],
+            [
                 InlineKeyboardButton(text="🗑 Удалить НФТ", callback_data="owner_nft_list"),
+                InlineKeyboardButton(text="🎪 Аукцион", callback_data="event_create"),
             ],
-            [InlineKeyboardButton(text="👮 Администраторы", callback_data="owner_admins")],
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="owner_settings")],
+            [InlineKeyboardButton(text="👮 Админы", callback_data="owner_admins")],
+            [InlineKeyboardButton(text="☢️ Сброс ВСЕХ", callback_data="owner_wipe_all")],
             [
-                InlineKeyboardButton(text="🗑 Сброс кликов", callback_data="owner_reset_clicks"),
-                InlineKeyboardButton(text="🔄 Сброс прогресса", callback_data="owner_reset_progress"),
-            ],
-            [InlineKeyboardButton(text="💣 Сбросить всё", callback_data="owner_reset_all")],
-            [InlineKeyboardButton(text="� Создать аукцион", callback_data="event_create")],
-            [InlineKeyboardButton(text="☢️ Сбросить ВСЕХ игроков", callback_data="owner_wipe_all")],
-            [
-                InlineKeyboardButton(text="◀️ Назад", callback_data="owner_panel_page:0"),
-                InlineKeyboardButton(text="⬅️ Выход", callback_data="menu"),
+                InlineKeyboardButton(text="◀️", callback_data="owner_panel_page:1"),
+                InlineKeyboardButton(text="🏠 Выход", callback_data="menu"),
             ],
         ])
-def owner_tickets_kb(tickets: list):
-    """Список тикетов с кнопками принять/отклонить."""
-    kb = []
-    for tid, uid, ttype, msg, dt in tickets:
-        short = msg[:30] + "..." if len(msg) > 30 else msg
-        kb.append([
-            InlineKeyboardButton(text=f"#{tid} {ttype}: {short}", callback_data=f"ticket_view_{tid}")
-        ])
-        kb.append([
-            InlineKeyboardButton(text="✅ Принять", callback_data=f"ticket_accept_{tid}"),
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"ticket_reject_{tid}"),
-        ])
-    kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def owner_nft_list_kb(templates: list):
-    """Список НФТ для удаления."""
-    kb = []
-    for tid, name, income, rarity, price in templates:
-        kb.append([InlineKeyboardButton(
-            text=f"🗑 #{tid} {name}",
-            callback_data=f"owner_nft_del_{tid}",
-        )])
-    kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-
-def owner_nft_publish_kb():
-    """Опубликовать / Отменить при создании НФТ."""
+def owner_admins_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Опубликовать", callback_data="owner_nft_publish")],
-        [InlineKeyboardButton(text="❌ Отменить", callback_data="owner_nft_cancel")],
+        [
+            InlineKeyboardButton(text="👮 Список", callback_data="owner_admin_list"),
+            InlineKeyboardButton(text="🔑 Ключ", callback_data="owner_admin_genkey"),
+        ],
+        [
+            InlineKeyboardButton(text="📋 Все ключи", callback_data="owner_admin_keys"),
+            InlineKeyboardButton(text="📊 Логи", callback_data="owner_admin_log"),
+        ],
+        [
+            InlineKeyboardButton(text="❌ Снять", callback_data="owner_admin_remove"),
+            InlineKeyboardButton(text="🔧 Права", callback_data="owner_admin_perms"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")],
     ])
 
 
 def owner_back_panel_kb():
-    """Кнопка назад в панель."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")],
     ])
 
 
-# ──────────── 10а. УПРАВЛЕНИЕ АДМИНИСТРАТОРАМИ (владелец) ────────────
-def owner_admins_kb():
+def owner_tickets_kb(tickets: list, page: int = 0, total_pages: int = 1):
+    kb = []
+    for t in tickets:
+        tid, uid, ttype, msg, dt = t
+        short = msg[:28] + "…" if len(msg) > 28 else msg
+        icon = "🚩" if ttype == "complaint" else "🐛"
+        kb.append([InlineKeyboardButton(
+            text=f"{icon} #{tid}  ·  {short}",
+            callback_data=f"ticket_view_{tid}",
+        )])
+    nav = []
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"owner_tickets:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"owner_tickets:{page + 1}"))
+        kb.append(nav)
+    kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def owner_nft_list_kb(templates: list, page: int = 0, total_pages: int = 1, prefix="owner"):
+    panel_cb = "owner_panel" if prefix == "owner" else "admin_panel"
+    view_pref = f"{prefix}_nft_view_"
+    pg_pref = f"{prefix}_nft_pg_"
+    kb = []
+    for t in templates:
+        tid = t[0]
+        name = t[1]
+        rarity = t[3] if len(t) > 3 else "Обычный"
+        emoji = _rarity_emoji(rarity)
+        kb.append([InlineKeyboardButton(
+            text=f"{emoji} #{tid}  ·  {name}",
+            callback_data=f"{view_pref}{tid}",
+        )])
+    # Навигация
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{pg_pref}0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{pg_pref}{page-1}"))
+    nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{pg_pref}{page+1}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{pg_pref}{total_pages-1}"))
+    if total_pages > 1:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data=panel_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def owner_nft_detail_kb(tid: int, page: int = 0, prefix="owner"):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👮 Список админов", callback_data="owner_admin_list")],
-        [InlineKeyboardButton(text="🔑 Создать ключ", callback_data="owner_admin_genkey")],
-        [InlineKeyboardButton(text="📋 Все ключи", callback_data="owner_admin_keys")],
-        [InlineKeyboardButton(text="📊 Лог действий", callback_data="owner_admin_log")],
-        [InlineKeyboardButton(text="❌ Снять админа", callback_data="owner_admin_remove")],
-        [InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")],
+        [InlineKeyboardButton(text="🗑 Удалить НФТ", callback_data=f"{prefix}_nft_del_{tid}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{prefix}_nft_pg_{page}")],
     ])
 
 
-# ──────────── 11. ПАНЕЛЬ АДМИНИСТРАТОРА (2 стр) ────────────
+def user_nfts_view_kb(nfts: list, uid: int, prefix: str = "owner"):
+    """Просмотр топ-5 НФТ пользователя из панели админа/владельца."""
+    from config import NFT_RARITY_EMOJI
+    kb = []
+    for nft in nfts:
+        un_id = nft[0]
+        name = nft[1]
+        income = nft[2]
+        rarity_name = nft[4] if len(nft) > 4 else "Обычный"
+        emoji = NFT_RARITY_EMOJI.get(rarity_name, "🟢")
+        kb.append([InlineKeyboardButton(
+            text=f"{emoji} {name} — {income}/ч",
+            callback_data="noop",
+        )])
+    if not nfts:
+        kb.append([InlineKeyboardButton(text="— нет НФТ —", callback_data="noop")])
+    kb.append([InlineKeyboardButton(text="⬅️ Профиль", callback_data=f"{prefix}_user_view_{uid}")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def owner_nft_publish_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Опубликовать", callback_data="owner_nft_publish"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="owner_nft_cancel"),
+        ],
+    ])
+
+
+# ━━━━━━━━━━━━  ЗАБАНЕННЫЕ (пагинация)  ━━━━━━━━━━━━
+def banned_list_kb(users: list, page: int, total_pages: int, prefix: str = "owner"):
+    kb = []
+    for u in users:
+        uid, uname, until = u
+        name = f"@{uname}" if uname else f"ID:{uid}"
+        kb.append([InlineKeyboardButton(
+            text=f"🚫 {name}",
+            callback_data=f"{prefix}_unban_quick_{uid}",
+        )])
+    nav = []
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{prefix}_banned:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{prefix}_banned:{page + 1}"))
+        kb.append(nav)
+    back_cb = "admin_panel" if prefix == "adm" else "owner_panel"
+    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# ━━━━━━━━━━━━  УЧАСТНИКИ (пагинация)  ━━━━━━━━━━━━
+def users_list_kb(users: list, page: int, total_pages: int, prefix: str = "owner"):
+    kb = []
+    for u in users:
+        uid, uname, clicks, rank, banned = u
+        name = f"@{uname}" if uname else f"ID:{uid}"
+        status = "🚫" if banned else "✅"
+        kb.append([InlineKeyboardButton(
+            text=f"{status} {name}  ·  {int(clicks):,} 💢".replace(",", "."),
+            callback_data=f"{prefix}_user_view_{uid}",
+        )])
+    nav = []
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{prefix}_users_pg:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{prefix}_users_pg:{page + 1}"))
+        kb.append(nav)
+    back_cb = "admin_panel" if prefix == "adm" else "owner_panel"
+    kb.append([InlineKeyboardButton(text="🔍 Поиск по ID", callback_data=f"{prefix}_user_search")])
+    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# ━━━━━━━━━━━━  ПРОФИЛЬ УЧАСТНИКА (админ)  ━━━━━━━━━━━━
+def dialog_user_reply_kb(sender_type: str, sender_id: int):
+    """Кнопка 'Ответить' для пользователя после сообщения от админа/владельца."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Ответить", callback_data=f"dialog_reply_{sender_type}_{sender_id}")],
+    ])
+
+
+def dialog_after_send_kb(prefix: str, uid: int):
+    """Кнопки для админа/владельца после отправки сообщения."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💬 Продолжить", callback_data=f"{prefix}_dialog_cont_{uid}"),
+            InlineKeyboardButton(text="🚪 Завершить", callback_data=f"{prefix}_dialog_end_{uid}"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Назад к профилю", callback_data=f"{prefix}_profile_pg_{uid}_0")],
+    ])
+
+
+def dialog_incoming_reply_kb(prefix: str, uid: int):
+    """Кнопки для админа/владельца когда пришёл ответ от пользователя."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💬 Ответить", callback_data=f"{prefix}_dialog_cont_{uid}"),
+            InlineKeyboardButton(text="🚪 Завершить", callback_data=f"{prefix}_dialog_end_{uid}"),
+        ],
+    ])
+
+
+def user_profile_admin_kb(uid: int, prefix: str = "owner", page: int = 0):
+    p = prefix
+    total_pages = 2
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{p}_profile_pg_{uid}_0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{p}_profile_pg_{uid}_{page-1}"))
+    nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{p}_profile_pg_{uid}_{page+1}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{p}_profile_pg_{uid}_{total_pages-1}"))
+
+    if page == 0:
+        rows = [
+            [
+                InlineKeyboardButton(text="💰 Выдать", callback_data=f"{p}_give_user_{uid}"),
+                InlineKeyboardButton(text="💸 Снять", callback_data=f"{p}_take_user_{uid}"),
+            ],
+            [
+                InlineKeyboardButton(text="🔨 Бан", callback_data=f"{p}_banmenu_{uid}"),
+                InlineKeyboardButton(text="✅ Разбан", callback_data=f"{p}_unban_user_{uid}"),
+            ],
+            [
+                InlineKeyboardButton(text="🎨 Выдать НФТ", callback_data=f"{p}_give_nft_{uid}"),
+                InlineKeyboardButton(text="📝 История", callback_data=f"{p}_user_hist_{uid}"),
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Сброс", callback_data=f"{p}_reset_{uid}"),
+                InlineKeyboardButton(text="💬 Написать", callback_data=f"{p}_msgusr_{uid}"),
+            ],
+            [
+                InlineKeyboardButton(text="🎁 Донат", callback_data=f"{p}_donate_{uid}"),
+                InlineKeyboardButton(text="💳 Бан оплаты", callback_data=f"{p}_payban_{uid}"),
+            ],
+        ]
+    else:  # page == 1
+        rows = [
+            [
+                InlineKeyboardButton(text="⚡ +Клик", callback_data=f"{p}_addval_{uid}_click"),
+                InlineKeyboardButton(text="📈 +Доход", callback_data=f"{p}_addval_{uid}_income"),
+            ],
+            [
+                InlineKeyboardButton(text="📦 +Ёмкость", callback_data=f"{p}_addval_{uid}_cap"),
+                InlineKeyboardButton(text="🎯 +Слот", callback_data=f"{p}_addval_{uid}_slot"),
+            ],
+            [
+                InlineKeyboardButton(text="🔕 Мут", callback_data=f"{p}_mute_{uid}"),
+                InlineKeyboardButton(text="🔔 Размут", callback_data=f"{p}_unmute_{uid}"),
+            ],
+            [
+                InlineKeyboardButton(text="🏷️ Ранг", callback_data=f"{p}_setrank_{uid}"),
+                InlineKeyboardButton(text="📛 Ник", callback_data=f"{p}_setname_{uid}"),
+            ],
+            [
+                InlineKeyboardButton(text="📊 Логи", callback_data=f"{p}_actlog_{uid}"),
+                InlineKeyboardButton(text="🔗 Рефералы", callback_data=f"{p}_resetref_{uid}"),
+            ],
+            [
+                InlineKeyboardButton(text="🎨 НФТ юзера", callback_data=f"{p}_usernfts_{uid}"),
+            ],
+        ]
+
+    rows.append(nav)
+    rows.append([InlineKeyboardButton(text="⬅️ Участники", callback_data=f"{p}_users")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def donate_submenu_kb(uid: int, prefix: str = "owner", vip_type: str | None = None):
+    """Подменю Донат — VIP/Premium выдача."""
+    p = prefix
+    rows = [
+        [
+            InlineKeyboardButton(text="⭐ VIP 7д", callback_data=f"{p}_setvip_{uid}_vip7"),
+            InlineKeyboardButton(text="👑 Prem 7д", callback_data=f"{p}_setvip_{uid}_prem7"),
+        ],
+        [
+            InlineKeyboardButton(text="⭐ VIP 30д", callback_data=f"{p}_setvip_{uid}_vip30"),
+            InlineKeyboardButton(text="👑 Prem 30д", callback_data=f"{p}_setvip_{uid}_prem30"),
+        ],
+        [
+            InlineKeyboardButton(text="⭐ VIP ∞", callback_data=f"{p}_setvip_{uid}_vip0"),
+            InlineKeyboardButton(text="👑 Prem ∞", callback_data=f"{p}_setvip_{uid}_prem0"),
+        ],
+    ]
+    if vip_type:
+        rows.append([InlineKeyboardButton(
+            text=f"❌ Снять {vip_type}", callback_data=f"{p}_setvip_{uid}_remove",
+        )])
+    rows.append([InlineKeyboardButton(
+        text="💳 Разбан оплаты", callback_data=f"{p}_payunban_{uid}",
+    )])
+    rows.append([InlineKeyboardButton(
+        text="⬅️ Профиль", callback_data=f"{p}_user_view_{uid}",
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ban_duration_kb(uid: int, prefix: str = "owner"):
+    p = prefix
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🕐 1 час", callback_data=f"{p}_doban_{uid}_1"),
+            InlineKeyboardButton(text="🕒 3 часа", callback_data=f"{p}_doban_{uid}_3"),
+        ],
+        [
+            InlineKeyboardButton(text="🕕 6 часов", callback_data=f"{p}_doban_{uid}_6"),
+            InlineKeyboardButton(text="🕛 12 часов", callback_data=f"{p}_doban_{uid}_12"),
+        ],
+        [
+            InlineKeyboardButton(text="🕐 24 часа", callback_data=f"{p}_doban_{uid}_24"),
+            InlineKeyboardButton(text="♾ Навсегда", callback_data=f"{p}_doban_{uid}_permanent"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{p}_user_view_{uid}")],
+    ])
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ПАНЕЛЬ АДМИНИСТРАТОРА  (3 стр.)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def admin_panel_kb(page: int = 0):
     if page == 0:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Жалобы / Тикеты", callback_data="adm_tickets")],
-            [InlineKeyboardButton(text="📨 Жалобы на чеки", callback_data="compl_pg:0")],
+            [InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats")],
+            [
+                InlineKeyboardButton(text="👥 Участники", callback_data="adm_users"),
+                InlineKeyboardButton(text="🚫 Забаненные", callback_data="adm_banned:0"),
+            ],
             [
                 InlineKeyboardButton(text="🔨 Бан", callback_data="adm_ban"),
                 InlineKeyboardButton(text="✅ Разбан", callback_data="adm_unban"),
             ],
-            [InlineKeyboardButton(text="🚫 Забаненные", callback_data="adm_banned_list")],
-            [InlineKeyboardButton(text="👀 Переписки", callback_data="adm_chat_logs")],
-            [InlineKeyboardButton(text="📊 Мои действия", callback_data="adm_my_log")],
+            [InlineKeyboardButton(text="💬 Переписки", callback_data="adm_chat_logs")],
             [
                 InlineKeyboardButton(text="▶️ Далее", callback_data="adm_panel_page:1"),
-                InlineKeyboardButton(text="⬅️ В меню", callback_data="menu"),
+                InlineKeyboardButton(text="🏠 Меню", callback_data="menu"),
             ],
         ])
-    else:
+    elif page == 1:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🎨 Создать НФТ", callback_data="adm_nft_create")],
-            [InlineKeyboardButton(text="💰 Выдать клики", callback_data="adm_give")],
-            [InlineKeyboardButton(text="📢 Рассылка", callback_data="adm_broadcast")],
             [
-                InlineKeyboardButton(text="🗑 Сброс кликов", callback_data="adm_reset_clicks"),
-                InlineKeyboardButton(text="🔄 Сброс прогресса", callback_data="adm_reset_progress"),
+                InlineKeyboardButton(text="📋 Тикеты", callback_data="adm_tickets:0"),
+                InlineKeyboardButton(text="📨 Жалобы", callback_data="compl_pg:0"),
             ],
-            [InlineKeyboardButton(text="� Создать аукцион", callback_data="event_create")],
+            [InlineKeyboardButton(text="💳 Заказы оплаты", callback_data="adm_orders:0")],
             [
-                InlineKeyboardButton(text="◀️ Назад", callback_data="adm_panel_page:0"),
-                InlineKeyboardButton(text="⬅️ В меню", callback_data="menu"),
+                InlineKeyboardButton(text="📢 Рассылка", callback_data="adm_broadcast"),
+                InlineKeyboardButton(text="📝 Логи", callback_data="adm_logs"),
+            ],
+            [InlineKeyboardButton(text="📊 Мои действия", callback_data="adm_my_log")],
+            [
+                InlineKeyboardButton(text="◀️", callback_data="adm_panel_page:0"),
+                InlineKeyboardButton(text="▶️", callback_data="adm_panel_page:2"),
+            ],
+        ])
+    else:  # page == 2
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎨 Создать НФТ", callback_data="adm_nft_create"),
+                InlineKeyboardButton(text="⚡ Быстрое НФТ", callback_data="adm_quick_nft"),
+            ],
+            [
+                InlineKeyboardButton(text="🗑 Удалить НФТ", callback_data="adm_nft_list"),
+                InlineKeyboardButton(text="🎪 Аукцион", callback_data="event_create"),
+            ],
+            [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm_settings")],
+            [
+                InlineKeyboardButton(text="◀️ Назад", callback_data="adm_panel_page:1"),
+                InlineKeyboardButton(text="🏠 Меню", callback_data="menu"),
             ],
         ])
 
@@ -496,24 +972,7 @@ def admin_back_kb():
     ])
 
 
-# ══════════════════════════════════════════════════════════
-#  12. ИСТОРИЯ ТРАНЗАКЦИЙ (ЧЕКИ)
-# ══════════════════════════════════════════════════════════
-
-_TX_TYPE_LABELS = {
-    "all":         "📋 Все",
-    "pvp":         "⚔️ PvP",
-    "trade":       "🔄 Обмены",
-    "chat":        "💬 Чаты",
-    "nft_buy":     "🛒 Покупки НФТ",
-    "nft_sell":    "💰 Продажи НФТ",
-    "market_buy":  "🏪 Покупки (площадка)",
-    "market_sell": "🏪 Продажи (площадка)",
-    "shop":        "🔧 Магазин",
-    "event":       "🎉 Ивенты",
-    "gift":        "🎁 Подарки",
-}
-
+# ━━━━━━━━━━━━  ИСТОРИЯ / ЧЕКИ  ━━━━━━━━━━━━
 _TX_ICON = {
     "pvp": "⚔️", "trade": "🔄", "chat": "💬",
     "nft_buy": "🛒", "nft_sell": "💰", "shop": "🔧",
@@ -523,7 +982,6 @@ _TX_ICON = {
 
 
 def history_menu_kb():
-    """Главное меню истории — фильтры по типу."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Все чеки", callback_data="hist:all:0")],
         [
@@ -531,140 +989,172 @@ def history_menu_kb():
             InlineKeyboardButton(text="🔄 Обмены", callback_data="hist:trade:0"),
         ],
         [
-            InlineKeyboardButton(text="💬 Чаты", callback_data="hist:chat:0"),
-            InlineKeyboardButton(text="🎉 Ивенты", callback_data="hist:event:0"),
-        ],
-        [
-            InlineKeyboardButton(text="🛒 НФТ покупки", callback_data="hist:nft_buy:0"),
-            InlineKeyboardButton(text="💰 НФТ продажи", callback_data="hist:nft_sell:0"),
+            InlineKeyboardButton(text="🛒 Покупки", callback_data="hist:nft_buy:0"),
+            InlineKeyboardButton(text="💰 Продажи", callback_data="hist:nft_sell:0"),
         ],
         [
             InlineKeyboardButton(text="🔧 Магазин", callback_data="hist:shop:0"),
-            InlineKeyboardButton(text="🎁 Подарки", callback_data="hist:gift:0"),
+            InlineKeyboardButton(text="🎉 Ивенты", callback_data="hist:event:0"),
         ],
         [InlineKeyboardButton(text="📨 Мои жалобы", callback_data="my_complaints:0")],
-        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        [InlineKeyboardButton(text="⬅️ Поддержка", callback_data="support_menu")],
     ])
 
 
-def history_list_kb(items: list, page: int, total_pages: int,
-                    tx_filter: str = "all"):
-    """Пагинированный список чеков."""
+def history_list_kb(items: list, page: int, total_pages: int, tx_filter: str = "all"):
     kb = []
     for item in items:
         tx_id, tx_type = item[0], item[1]
         amount = item[4]
         details = item[5] or ""
         icon = _TX_ICON.get(tx_type, "📋")
-        short_det = details[:28] + ".." if len(details) > 30 else details
-        amount_str = f" {int(amount)}💢" if amount else ""
+        short = details[:26] + "…" if len(details) > 26 else details
+        amt = f" {int(amount)}💢" if amount else ""
         kb.append([InlineKeyboardButton(
-            text=f"{icon} #{tx_id}{amount_str} ∙ {short_det}",
+            text=f"{icon} #{tx_id}{amt}  ·  {short}",
             callback_data=f"check:{tx_id}",
         )])
     nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(
-            text="◀", callback_data=f"hist:{tx_filter}:{page - 1}"))
-    nav.append(InlineKeyboardButton(
-        text=f"📄 {page + 1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(
-            text="▶", callback_data=f"hist:{tx_filter}:{page + 1}"))
-    if nav:
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"hist:{tx_filter}:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"hist:{tx_filter}:{page + 1}"))
         kb.append(nav)
-    kb.append([InlineKeyboardButton(
-        text="🔍 Фильтры", callback_data="history_menu")])
-    kb.append([InlineKeyboardButton(
-        text="⬅️ В меню", callback_data="menu")])
+    kb.append([
+        InlineKeyboardButton(text="🔍 Фильтры", callback_data="history_menu"),
+        InlineKeyboardButton(text="⬅️ Поддержка", callback_data="support_menu"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def check_detail_kb(tx_id: int, can_complain: bool = True, is_admin: bool = False):
-    """Кнопки на детальном просмотре чека."""
+def check_detail_kb(tx_id: int, can_complain: bool = True):
     kb = []
     if can_complain:
-        kb.append([InlineKeyboardButton(
-            text="⚠️ Подать жалобу", callback_data=f"complain:{tx_id}")])
-    if is_admin:
-        kb.append([InlineKeyboardButton(
-            text="🔨 Админ-действие", callback_data=f"adm_check:{tx_id}")])
-    kb.append([InlineKeyboardButton(
-        text="⬅️ К списку", callback_data="hist:all:0")])
+        kb.append([InlineKeyboardButton(text="⚠️ Подать жалобу", callback_data=f"complain:{tx_id}")])
+    kb.append([InlineKeyboardButton(text="⬅️ К списку", callback_data="hist:all:0")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 def complaints_list_kb(complaints: list, page: int = 0, total_pages: int = 1):
-    """Список жалоб (для админов)."""
     kb = []
     for c in complaints:
-        c_id, tx_id, uid, reason, status, dt, tx_type, amount, details = c
+        c_id = c[0]
+        tx_id = c[1]
+        reason = c[3]
+        status = c[4]
+        tx_type = c[6] if len(c) > 6 else ""
         icon = _TX_ICON.get(tx_type, "📋")
-        short_r = reason[:25] + ".." if len(reason) > 27 else reason
-        status_icon = "🟡" if status == "pending" else "🔵"
+        short = reason[:23] + "…" if len(reason) > 23 else reason
+        s_icon = "🟡" if status == "pending" else "🔵"
         kb.append([InlineKeyboardButton(
-            text=f"{status_icon} #{c_id} {icon} Чек#{tx_id} ∙ {short_r}",
+            text=f"{s_icon} #{c_id} {icon} Чек#{tx_id}  ·  {short}",
             callback_data=f"compl_view:{c_id}",
         )])
     nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀", callback_data=f"compl_pg:{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"📄 {page+1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="▶", callback_data=f"compl_pg:{page+1}"))
-    if nav:
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"compl_pg:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"compl_pg:{page + 1}"))
         kb.append(nav)
     kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data="admin_panel")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 def complaint_action_kb(complaint_id: int):
-    """Действия админа по жалобе."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💸 Возврат", callback_data=f"compl_act:{complaint_id}:refund"),
-            InlineKeyboardButton(text="⚠️ Предупреждение", callback_data=f"compl_act:{complaint_id}:warn"),
+            InlineKeyboardButton(text="⚠️ Пред.", callback_data=f"compl_act:{complaint_id}:warn"),
         ],
         [
             InlineKeyboardButton(text="🔨 Бан", callback_data=f"compl_act:{complaint_id}:ban"),
             InlineKeyboardButton(text="❌ Отклонить", callback_data=f"compl_act:{complaint_id}:reject"),
         ],
-        [InlineKeyboardButton(text="📝 Чек доказательство", callback_data=f"compl_check:{complaint_id}")],
-        [InlineKeyboardButton(text="⬅️ К жалобам", callback_data="compl_pg:0")],
+        [InlineKeyboardButton(text="⬅️ Жалобы", callback_data="compl_pg:0")],
     ])
 
 
 def my_complaints_kb(complaints: list, page: int = 0, total_pages: int = 1):
-    """Список жалоб пользователя."""
     kb = []
     for c in complaints:
-        c_id, tx_id, reason, status, action, comment, dt = c
+        c_id = c[0]
+        tx_id = c[1]
+        reason = c[2]
+        status = c[3]
         s_icon = {"pending": "🟡", "reviewing": "🔵", "resolved": "✅"}.get(status, "⚪")
-        short_r = reason[:25] + ".." if len(reason) > 27 else reason
+        short = reason[:23] + "…" if len(reason) > 23 else reason
         kb.append([InlineKeyboardButton(
-            text=f"{s_icon} #{c_id} ∙ Чек #{tx_id} ∙ {short_r}",
+            text=f"{s_icon} #{c_id}  ·  Чек #{tx_id}  ·  {short}",
             callback_data=f"my_compl:{c_id}",
         )])
     nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀", callback_data=f"my_complaints:{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"📄 {page+1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="▶", callback_data=f"my_complaints:{page+1}"))
-    if nav:
+    if total_pages > 1:
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"my_complaints:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"my_complaints:{page + 1}"))
         kb.append(nav)
-    kb.append([InlineKeyboardButton(text="⬅️ История", callback_data="history_menu")])
+    kb.append([InlineKeyboardButton(text="⬅️ Поддержка", callback_data="support_menu")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def adm_check_action_kb(tx_id: int):
-    """Админ-действия прямо из чека."""
+# ━━━━━━━━━━━━  ЛОГИ ВЛАДЕЛЬЦА  ━━━━━━━━━━━━
+def owner_logs_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 Инфо игрока 1", callback_data=f"adm_tx_u1:{tx_id}")],
-        [InlineKeyboardButton(text="👤 Инфо игрока 2", callback_data=f"adm_tx_u2:{tx_id}")],
         [
-            InlineKeyboardButton(text="🔨 Бан игрока", callback_data=f"adm_tx_ban:{tx_id}"),
-            InlineKeyboardButton(text="💸 Возврат", callback_data=f"adm_tx_refund:{tx_id}"),
+            InlineKeyboardButton(text="⚔️ PvP", callback_data="olog:pvp:0"),
+            InlineKeyboardButton(text="🔄 Обмены", callback_data="olog:trade:0"),
         ],
-        [InlineKeyboardButton(text="⬅️ К чеку", callback_data=f"check:{tx_id}")],
+        [
+            InlineKeyboardButton(text="💰 Продажи", callback_data="olog:sale:0"),
+            InlineKeyboardButton(text="🛒 Покупки", callback_data="olog:buy:0"),
+        ],
+        [InlineKeyboardButton(text="🔍 По ID участника", callback_data="olog:search")],
+        [InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")],
     ])
+
+
+def admin_logs_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚔️ PvP", callback_data="alog:pvp:0"),
+            InlineKeyboardButton(text="🔄 Обмены", callback_data="alog:trade:0"),
+        ],
+        [
+            InlineKeyboardButton(text="💰 Продажи", callback_data="alog:sale:0"),
+            InlineKeyboardButton(text="🛒 Покупки", callback_data="alog:buy:0"),
+        ],
+        [InlineKeyboardButton(text="🔍 По ID участника", callback_data="alog:search")],
+        [InlineKeyboardButton(text="⬅️ Панель", callback_data="adm_panel")],
+    ])
+
+
+# ━━━━━━━━━━━━  АУКЦИОНЫ (user)  ━━━━━━━━━━━━
+def auction_list_kb(events):
+    kb = []
+    for ev in events:
+        eid = ev[0] if isinstance(ev, tuple) else ev["id"]
+        name = ev[1] if isinstance(ev, tuple) else ev["name"]
+        kb.append([InlineKeyboardButton(text=f"🎪 {name}", callback_data=f"auc_view:{eid}")])
+    if not kb:
+        kb.append([InlineKeyboardButton(text="— Нет активных —", callback_data="noop")])
+    kb.append([InlineKeyboardButton(text="⬅️ Мини-игры", callback_data="minigames_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def auction_detail_kb(event_id, user_joined: bool = False):
+    kb = []
+    if user_joined:
+        kb.append([InlineKeyboardButton(text="⬆️ Повысить ставку", callback_data=f"auc_raise:{event_id}")])
+    else:
+        kb.append([InlineKeyboardButton(text="🎯 Участвовать", callback_data=f"auc_join:{event_id}")])
+    kb.append([
+        InlineKeyboardButton(text="🔄 Обновить", callback_data=f"auc_view:{event_id}"),
+        InlineKeyboardButton(text="⬅️ Аукционы", callback_data="auc_list"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
