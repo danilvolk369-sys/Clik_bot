@@ -332,21 +332,22 @@ async def view_player_profile(call: CallbackQuery):
 
     kb_rows = []
     # Лайк (нельзя лайкнуть себя, нельзя повторно)
-    if viewer_uid != target_uid and not already_liked:
-        kb_rows.append([InlineKeyboardButton(
-            text="❤️ Поставить лайк",
-            callback_data=f"rate_like_{target_uid}",
-        )])
-    elif viewer_uid != target_uid and already_liked:
-        kb_rows.append([InlineKeyboardButton(
-            text="❤️ Вы уже лайкнули",
-            callback_data="noop",
-        )])
-    if nft_count > 0:
-        kb_rows.append([InlineKeyboardButton(
-            text="🎨 Посмотреть НФТ",
-            callback_data=f"rating_nfts_{target_uid}",
-        )])
+    if viewer_uid != target_uid:
+        if not already_liked:
+            kb_rows.append([InlineKeyboardButton(
+                text="❤️ Поставить лайк",
+                callback_data=f"rate_like_{target_uid}",
+            )])
+        else:
+            kb_rows.append([InlineKeyboardButton(
+                text="❤️ Вы уже лайкнули",
+                callback_data="noop",
+            )])
+    # НФТ — всегда показываем кнопку
+    kb_rows.append([InlineKeyboardButton(
+        text=f"🎨 Посмотреть НФТ ({nft_count})",
+        callback_data=f"rating_nfts_{target_uid}",
+    )])
     kb_rows.append([InlineKeyboardButton(text="⬅️ К рейтингу", callback_data="top_15")])
 
     await send_msg(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
