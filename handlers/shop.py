@@ -318,12 +318,16 @@ async def buy_pkg_select(call: CallbackQuery, state: FSMContext):
     order_text = await _build_order_text(order_id, label, price_rub)
     text = (
         f"{order_text}\n\n"
-        "📝 <b>Шаг 1 из 2</b>\n"
-        "Введите ваше <b>Имя Фамилия</b>\n"
-        "(как в переводе) ⬇️"
+        "📝 <b>Шаг 1 из 3</b>\n"
+        "Переведите сумму по реквизитам выше.\n\n"
+        "❓ <b>Вы оплатили?</b>"
     )
-    await state.set_state(PaymentStates.waiting_fio)
+    await state.set_state(PaymentStates.waiting_paid_confirm)
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, оплатил", callback_data=f"pay_yes:{order_id}"),
+            InlineKeyboardButton(text="❌ Нет ещё", callback_data=f"pay_no:{order_id}"),
+        ],
         [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")],
     ]))
     await call.answer()
@@ -337,8 +341,8 @@ async def pay_vip_menu(call: CallbackQuery):
     text = (
         "<b>⭐ VIP / Premium</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
-        "▸ <b>VIP</b> — ×2 к силе клика\n"
-        "▸ <b>Premium</b> — ×3 к клику И доходу\n\n"
+        "▸ <b>VIP</b> — ×2 клик, ×0.5 доход\n"
+        "▸ <b>Premium</b> — ×3 клик, ×2 доход\n\n"
         "Выберите пакет:"
     )
     await safe_edit(call.message, text, reply_markup=pay_vip_packages_kb())
@@ -368,18 +372,71 @@ async def buy_vip_select(call: CallbackQuery, state: FSMContext):
     order_text = await _build_order_text(order_id, label, price_rub, extra=f"⏱ Срок: <b>{dur_text}</b>")
     text = (
         f"{order_text}\n\n"
-        "📝 <b>Шаг 1 из 2</b>\n"
-        "Введите ваше <b>Имя Фамилия</b>\n"
-        "(как в переводе) ⬇️"
+        "📝 <b>Шаг 1 из 3</b>\n"
+        "Переведите сумму по реквизитам выше.\n\n"
+        "❓ <b>Вы оплатили?</b>"
     )
+    await state.set_state(PaymentStates.waiting_paid_confirm)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, оплатил", callback_data=f"pay_yes:{order_id}"),
+            InlineKeyboardButton(text="❌ Нет ещё", callback_data=f"pay_no:{order_id}"),
+        ],
+        [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")],
+    ]))
+    await call.answer()
+
+
+# ── Шаг 1: Вы оплатили? ──
+@router.callback_query(F.data.startswith("pay_yes:"))
+async def pay_confirmed_yes(call: CallbackQuery, state: FSMContext):
+    order_id = int(call.data.split(":")[1])
+    await state.update_data(order_id=order_id)
     await state.set_state(PaymentStates.waiting_fio)
+    text = (
+        f"✅ Отлично!\n\n"
+        f"📝 <b>Шаг 2 из 3</b>\n"
+        f"Введите ваши <b>Фамилия Имя</b>\n"
+        f"(как в переводе) ⬇️"
+    )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")],
     ]))
     await call.answer()
 
 
-# ── Шаг 1: Получение ФИО ──
+@router.callback_query(F.data.startswith("pay_no:"))
+async def pay_confirmed_no(call: CallbackQuery, state: FSMContext):
+    order_id = int(call.data.split(":")[1])
+    data = await state.get_data()
+    pkg_type = data.get('pkg_type', '?')
+    pkg_id = data.get('pkg_id', '?')
+    amount = data.get('amount', '?')
+
+    if pkg_type == "clicks" and pkg_id in CLICK_PACKAGES:
+        _, _, label = CLICK_PACKAGES[pkg_id]
+    elif pkg_type == "vip" and pkg_id in VIP_PACKAGES:
+        _, _, _, _, label = VIP_PACKAGES[pkg_id]
+    else:
+        label = "?"
+
+    order_text = await _build_order_text(order_id, label, amount)
+    text = (
+        f"{order_text}\n\n"
+        "⚠️ Сначала переведите сумму по реквизитам.\n"
+        "Когда оплатите — нажмите «Да, оплатил»."
+    )
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, оплатил", callback_data=f"pay_yes:{order_id}"),
+            InlineKeyboardButton(text="❌ Нет ещё", callback_data=f"pay_no:{order_id}"),
+        ],
+        [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")],
+    ]))
+    await call.answer()
+
+
+# ── Шаг 2: Получение Фамилия Имя ──
 @router.message(PaymentStates.waiting_fio)
 async def receive_fio(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -390,8 +447,8 @@ async def receive_fio(message: Message, state: FSMContext):
 
     if not message.text or len(message.text.strip().split()) != 2:
         return await message.answer(
-            "📝 Введите <b>Имя Фамилия</b> (2 слова, без отчества).\n"
-            "Пример: <i>Иван Иванов</i>",
+            "📝 Введите <b>Фамилия Имя</b> (2 слова).\n"
+            "Пример: <i>Иванов Иван</i>",
             parse_mode="HTML",
         )
 
@@ -401,9 +458,8 @@ async def receive_fio(message: Message, state: FSMContext):
 
     text = (
         f"✅ <b>ФИО:</b> {fio}\n\n"
-        f"📸 <b>Шаг 2 из 2</b>\n"
-        f"Переведите сумму и отправьте\n"
-        f"скриншот / чек оплаты ⬇️"
+        f"📸 <b>Шаг 3 из 3</b>\n"
+        f"Отправьте скриншот / чек оплаты ⬇️"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")],
@@ -514,9 +570,9 @@ async def pay_confirm_send(call: CallbackQuery, state: FSMContext):
         approve_text = f"💢 Выдать {fnum(clicks)} Тохн"
     elif pkg_type == "vip" and pkg_id in VIP_PACKAGES:
         mc, mi, dur, _, label = VIP_PACKAGES[pkg_id]
-        vip_name = "VIP" if mc == 2 and mi == 1 else "Premium"
+        vip_name = "VIP" if mc == 2 else "Premium"  # VIP: 2,0.5 | Premium: 3,2
         dur_text = f"{dur} дн." if dur > 0 else "навсегда"
-        reward_desc = f"⭐ {vip_name} (×{mc} клик, {dur_text})"
+        reward_desc = f"⭐ {vip_name} (×{mc:g} клик, ×{mi:g} доход, {dur_text})"
         approve_text = f"⭐ Выдать {vip_name}"
     else:
         reward_desc = f"{pkg_type}/{pkg_id}"

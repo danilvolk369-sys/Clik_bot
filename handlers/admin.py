@@ -36,6 +36,7 @@ from database import (
     get_all_active_chats, get_active_chat_by_id,
     count_chat_messages, end_active_chat,
     count_nft_templates, get_nft_templates_page, get_nft_template,
+    remove_admin,
 )
 from keyboards import (
     admin_panel_kb, admin_back_kb,
@@ -48,6 +49,11 @@ from keyboards import (
 from handlers.common import fnum
 
 router = Router()
+
+
+async def _user_profile_kb(uid: int, prefix: str = "adm", page: int = 0):
+    """Клавиатура профиля."""
+    return user_profile_admin_kb(uid, prefix, page)
 
 
 def _has_perm(perms: dict, key: str) -> bool:
@@ -229,7 +235,7 @@ async def adm_doban(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _adm_user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 0))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "adm", 0))
 
 
 @router.callback_query(F.data.startswith("adm_ban_user_"))
@@ -255,7 +261,7 @@ async def adm_unban_user_profile(call: CallbackQuery):
     user = await get_user(target)
     if user:
         text = await _adm_user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(target, "adm", 0))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(target, "adm", 0))
 
 
 # ── Пагинация профиля ──
@@ -270,7 +276,15 @@ async def adm_profile_page(call: CallbackQuery):
     if not user:
         return await call.answer("❌ Не найден", show_alert=True)
     text = await _adm_user_profile_text(user)
-    await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", page))
+    kb = await _user_profile_kb(uid, "adm", page)
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.bot.send_message(call.message.chat.id, text, reply_markup=kb)
     await call.answer()
 
 
@@ -286,28 +300,36 @@ async def adm_set_vip(call: CallbackQuery):
         await remove_user_vip(uid)
         await log_admin_action(call.from_user.id, "remove_vip", uid)
         await call.answer("✅ VIP/Premium снят", show_alert=True)
+    elif action == "rmvip":
+        await remove_user_vip(uid)
+        await log_admin_action(call.from_user.id, "remove_vip", uid, "VIP")
+        await call.answer("✅ VIP снят", show_alert=True)
+    elif action == "rmprem":
+        await remove_user_vip(uid)
+        await log_admin_action(call.from_user.id, "remove_vip", uid, "Premium")
+        await call.answer("✅ Premium снят", show_alert=True)
     elif action == "vip7":
-        await set_user_vip(uid, "VIP", 2, 1, 7)
+        await set_user_vip(uid, "VIP", 2, 0.5, 7)
         await log_admin_action(call.from_user.id, "set_vip", uid, "VIP 7d")
         await call.answer("✅ VIP на 7 дней", show_alert=True)
     elif action == "vip30":
-        await set_user_vip(uid, "VIP", 2, 1, 30)
+        await set_user_vip(uid, "VIP", 2, 0.5, 30)
         await log_admin_action(call.from_user.id, "set_vip", uid, "VIP 30d")
         await call.answer("✅ VIP на 30 дней", show_alert=True)
     elif action == "vip0":
-        await set_user_vip(uid, "VIP", 2, 1, 0)
+        await set_user_vip(uid, "VIP", 2, 0.5, 0)
         await log_admin_action(call.from_user.id, "set_vip", uid, "VIP perm")
         await call.answer("✅ VIP навсегда", show_alert=True)
     elif action == "prem7":
-        await set_user_vip(uid, "Premium", 3, 3, 7)
+        await set_user_vip(uid, "Premium", 3, 2, 7)
         await log_admin_action(call.from_user.id, "set_vip", uid, "Prem 7d")
         await call.answer("✅ Premium на 7 дней", show_alert=True)
     elif action == "prem30":
-        await set_user_vip(uid, "Premium", 3, 3, 30)
+        await set_user_vip(uid, "Premium", 3, 2, 30)
         await log_admin_action(call.from_user.id, "set_vip", uid, "Prem 30d")
         await call.answer("✅ Premium на 30 дней", show_alert=True)
     elif action == "prem0":
-        await set_user_vip(uid, "Premium", 3, 3, 0)
+        await set_user_vip(uid, "Premium", 3, 2, 0)
         await log_admin_action(call.from_user.id, "set_vip", uid, "Prem perm")
         await call.answer("✅ Premium навсегда", show_alert=True)
     else:
@@ -316,9 +338,13 @@ async def adm_set_vip(call: CallbackQuery):
     if user:
         from keyboards import donate_submenu_kb
         vip = user["vip_type"]
+        pb = await is_payment_banned(uid)
         await call.message.edit_text(
-            await _adm_profile_text(user),
-            reply_markup=donate_submenu_kb(uid, "adm", vip),
+            f"🎁 <b>Донат — {uid}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Статус: <b>{vip or 'нет'}</b>\n\n"
+            f"Выберите действие:",
+            reply_markup=donate_submenu_kb(uid, "adm", vip, pb),
         )
 
 
@@ -333,8 +359,16 @@ async def adm_payban(call: CallbackQuery):
     await call.answer("🚫 Оплата заблокирована", show_alert=True)
     user = await get_user(uid)
     if user:
-        text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 0))
+        from keyboards import donate_submenu_kb
+        vip = user["vip_type"]
+        pb = await is_payment_banned(uid)
+        await call.message.edit_text(
+            f"🎁 <b>Донат — {uid}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Статус: <b>{vip or 'нет'}</b>\n\n"
+            f"Выберите действие:",
+            reply_markup=donate_submenu_kb(uid, "adm", vip, pb),
+        )
 
 
 @router.callback_query(F.data.startswith("adm_payunban_"))
@@ -347,8 +381,16 @@ async def adm_payunban(call: CallbackQuery):
     await call.answer("✅ Оплата разблокирована", show_alert=True)
     user = await get_user(uid)
     if user:
-        text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 0))
+        from keyboards import donate_submenu_kb
+        vip = user["vip_type"]
+        pb = await is_payment_banned(uid)
+        await call.message.edit_text(
+            f"🎁 <b>Донат — {uid}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Статус: <b>{vip or 'нет'}</b>\n\n"
+            f"Выберите действие:",
+            reply_markup=donate_submenu_kb(uid, "adm", vip, pb),
+        )
 
 
 # ══════════════════════════════════════════
@@ -363,13 +405,14 @@ async def adm_donate_menu(call: CallbackQuery):
     uid = int(call.data.replace("adm_donate_", ""))
     user = await get_user(uid)
     vip = user["vip_type"] if user else None
+    pb = await is_payment_banned(uid)
     from keyboards import donate_submenu_kb
     await call.message.edit_text(
         f"🎁 <b>Донат — {uid}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
         f"Статус: <b>{vip or 'нет'}</b>\n\n"
         f"Выберите действие:",
-        reply_markup=donate_submenu_kb(uid, "adm", vip),
+        reply_markup=donate_submenu_kb(uid, "adm", vip, pb),
     )
     await call.answer()
 
@@ -396,7 +439,7 @@ async def adm_give_donate(call: CallbackQuery):
         [
             InlineKeyboardButton(text="1.000.000 💢", callback_data=f"adm_don_{uid}_1000000"),
         ],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_profile_pg_{uid}_1")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_donate_{uid}")],
     ])
     await call.message.edit_text(
         f"🎁 Выдать донат пользователю {uid}\n"
@@ -432,8 +475,13 @@ async def adm_donate_exec(call: CallbackQuery):
     await call.answer(f"✅ +{fnum(amount)} 💢 выдано", show_alert=True)
     user = await get_user(uid)
     if user:
-        text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 1))
+        from keyboards import donate_submenu_kb
+        vip = user["vip_type"]
+        pb = await is_payment_banned(uid)
+        await call.message.edit_text(
+            await _adm_profile_text(user),
+            reply_markup=donate_submenu_kb(uid, "adm", vip, pb),
+        )
 
 
 # ── Написать участнику ──
@@ -549,7 +597,7 @@ async def adm_addval_menu(call: CallbackQuery):
             row.append(InlineKeyboardButton(
                 text=label, callback_data=f"adm_doval_{uid}_{val_type}_{a}"))
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_profile_pg_{uid}_2")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_profile_pg_{uid}_1")])
 
     await call.message.edit_text(
         f"{name} для {uid}\n━━━━━━━━━━━━━━━━━━━\n\nВыберите значение:",
@@ -593,47 +641,12 @@ async def adm_doval_exec(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 1))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "adm", 1))
 
 
 # ══════════════════════════════════════════
-#  СТРАНЦА 4 – Мут, Ранг, Логи, Рефералы
+#  СТРАНЦА 2 – Ранг, Логи, Рефералы
 # ══════════════════════════════════════════
-
-# ── Мут / Размут ──
-@router.callback_query(F.data.startswith("adm_mute_"))
-async def adm_mute_user(call: CallbackQuery):
-    if not await is_admin(call.from_user.id):
-        return await call.answer("❌", show_alert=True)
-    uid = int(call.data.replace("adm_mute_", ""))
-    from database import get_db
-    db = await get_db()
-    await db.execute("UPDATE users SET anonymous = 1 WHERE user_id = ?", (uid,))
-    await db.commit()
-    await log_admin_action(call.from_user.id, "mute", uid)
-    await call.answer(f"🔕 {uid} замучен", show_alert=True)
-    user = await get_user(uid)
-    if user:
-        text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 1))
-
-
-@router.callback_query(F.data.startswith("adm_unmute_"))
-async def adm_unmute_user(call: CallbackQuery):
-    if not await is_admin(call.from_user.id):
-        return await call.answer("❌", show_alert=True)
-    uid = int(call.data.replace("adm_unmute_", ""))
-    from database import get_db
-    db = await get_db()
-    await db.execute("UPDATE users SET anonymous = 0 WHERE user_id = ?", (uid,))
-    await db.commit()
-    await log_admin_action(call.from_user.id, "unmute", uid)
-    await call.answer(f"🔔 {uid} размучен", show_alert=True)
-    user = await get_user(uid)
-    if user:
-        text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 1))
-
 
 # ── Сменить ранг ──
 @router.callback_query(F.data.startswith("adm_setrank_"))
@@ -649,7 +662,7 @@ async def adm_set_rank_menu(call: CallbackQuery):
                 text=f"{r}. {RANKS_LIST[r].split(' ', 1)[0]}",
                 callback_data=f"adm_dorank_{uid}_{r}"))
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_profile_pg_{uid}_3")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_profile_pg_{uid}_1")])
     await call.message.edit_text(
         f"🏷️ Сменить ранг для {uid}\n━━━━━━━━━━━━━━━━━━━\n\nВыберите ранг:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
@@ -674,7 +687,7 @@ async def adm_set_rank_exec(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 1))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "adm", 1))
 
 
 # ── Логи действий пользователя ──
@@ -683,16 +696,16 @@ async def adm_activity_log(call: CallbackQuery):
     if not await is_admin(call.from_user.id):
         return await call.answer("❌", show_alert=True)
     uid = int(call.data.replace("adm_actlog_", ""))
-    logs = await get_activity_logs(uid, 0, 15)
+    logs = await get_activity_logs(user_id=uid, page=0, per_page=15)
     lines = [f"📊 Логи действий {uid}\n━━━━━━━━━━━━━━━━━━━\n"]
     if not logs:
         lines.append("Нет записей.")
     else:
         for log in logs:
-            dt = log[3][:16] if log[3] else "?"
-            lines.append(f"• {dt} │ {log[1]} │ {log[2]}")
+            dt = log[4][:16] if log[4] else "?"
+            lines.append(f"• {dt} │ {log[2]} │ {log[3] or ''}")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_profile_pg_{uid}_3")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_profile_pg_{uid}_1")],
     ])
     await call.message.edit_text("\n".join(lines), reply_markup=kb)
     await call.answer()
@@ -715,7 +728,7 @@ async def adm_reset_referrals(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 1))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "adm", 1))
 
 
 # ── Просмотр НФТ юзера (топ-5) ──
@@ -766,7 +779,7 @@ async def adm_set_name(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _adm_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "adm", 1))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "adm", 1))
 
 
 # ══════════════════════════════════════════
@@ -777,6 +790,9 @@ async def adm_users(call: CallbackQuery):
     uid = call.from_user.id
     if not await is_admin(uid) and uid != OWNER_ID:
         return await call.answer("❌", show_alert=True)
+    perms = await get_admin_permissions(uid)
+    if uid != OWNER_ID and not _has_perm(perms, "users"):
+        return await call.answer("❌ Нет прав", show_alert=True)
     await _adm_show_users(call, 0)
 
 
@@ -795,7 +811,15 @@ async def _adm_show_users(call, page):
     total_pages = max(1, math.ceil(total / per_page))
     users = await get_users_page(page, per_page)
     text = f"👥 УЧАСТНК ({total})\n══════════════════════\n"
-    await call.message.edit_text(text, reply_markup=users_list_kb(users, page, total_pages, "adm"))
+    kb = users_list_kb(users, page, total_pages, "adm")
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.bot.send_message(call.message.chat.id, text, reply_markup=kb)
     await call.answer()
 
 
@@ -822,7 +846,7 @@ async def adm_user_search_id(message: Message, state: FSMContext):
     if not user:
         return await message.answer("❌ Не найден", reply_markup=admin_back_kb())
     text = await _adm_profile_text(user)
-    await message.answer(text, reply_markup=user_profile_admin_kb(uid, "adm"))
+    await message.answer(text, reply_markup=await _user_profile_kb(uid, "adm"))
 
 
 async def _adm_profile_text(user) -> str:
@@ -832,9 +856,8 @@ async def _adm_profile_text(user) -> str:
     nft_count = await count_user_nfts(uid)
     max_slots = await get_user_nft_slots(uid)
     vip = user["vip_type"]
-    vip_line = ""
     if vip:
-        exp = user.get("vip_expires", None)
+        exp = user["vip_expires"]
         if exp == "permanent":
             exp_str = "навсегда"
         elif exp:
@@ -848,6 +871,8 @@ async def _adm_profile_text(user) -> str:
             exp_str = "—"
         emoji = "💎" if vip.lower() == "premium" else "⭐"
         vip_line = f"{emoji} Статус: {vip} — {exp_str}\n"
+    else:
+        vip_line = "🔹 Статус: Обычный\n"
     # Pinned NFT
     from database import get_user_pinned_nft
     pinned = await get_user_pinned_nft(uid)
@@ -884,7 +909,15 @@ async def adm_user_view(call: CallbackQuery):
     if not user:
         return await call.answer("❌", show_alert=True)
     text = await _adm_profile_text(user)
-    await call.message.edit_text(text, reply_markup=user_profile_admin_kb(target, "adm"))
+    kb = await _user_profile_kb(target, "adm")
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.bot.send_message(call.message.chat.id, text, reply_markup=kb)
     await call.answer()
 
 
@@ -964,7 +997,7 @@ async def adm_take_process(message: Message, state: FSMContext):
 
 
 # ── Сброс ──
-@router.callback_query(F.data.startswith("adm_reset_"))
+@router.callback_query(F.data.regexp(r"^adm_reset_\d+$"))
 async def adm_reset(call: CallbackQuery):
     uid = call.from_user.id
     if not await is_admin(uid):
@@ -973,6 +1006,10 @@ async def adm_reset(call: CallbackQuery):
     await reset_user_progress(target)
     await log_admin_action(uid, "reset", target)
     await call.answer(f"✅ {target} сброшен", show_alert=True)
+    user = await get_user(target)
+    if user:
+        text = await _adm_profile_text(user)
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(target, "adm", 0))
 
 
 # ══════════════════════════════════════════
@@ -983,6 +1020,9 @@ async def adm_tickets(call: CallbackQuery):
     uid = call.from_user.id
     if not await is_admin(uid) and uid != OWNER_ID:
         return await call.answer("❌", show_alert=True)
+    perms = await get_admin_permissions(uid)
+    if uid != OWNER_ID and not _has_perm(perms, "tickets"):
+        return await call.answer("❌ Нет прав", show_alert=True)
     page = int(call.data.split(":")[1])
     total = await count_open_tickets()
     per_page = 5
@@ -1144,6 +1184,44 @@ async def adm_my_log(call: CallbackQuery):
     await call.answer()
 
 
+# ── Разжаловаться (самоудаление из админов) ──
+@router.callback_query(F.data == "adm_demote_self")
+async def adm_demote_self(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await is_admin(uid):
+        return await call.answer("❌", show_alert=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, разжаловаться", callback_data="adm_demote_confirm")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_panel")],
+    ])
+    await call.message.edit_text(
+        "⚠️ <b>Разжаловаться?</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
+        "Вы потеряете все права администратора.\n"
+        "Для восстановления понадобится новый ключ.",
+        reply_markup=kb,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_demote_confirm")
+async def adm_demote_confirm(call: CallbackQuery, state: FSMContext):
+    uid = call.from_user.id
+    if not await is_admin(uid):
+        return await call.answer("❌", show_alert=True)
+    from database import remove_admin
+    await remove_admin(uid)
+    await log_admin_action(uid, "self_demote", uid, "Разжаловался добровольно")
+    await state.clear()
+    await call.message.edit_text(
+        "✅ Вы разжалованы из администраторов.\n\n"
+        "Для восстановления обратитесь к владельцу.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
+        ]),
+    )
+    await call.answer()
+
+
 # ── Выдать НФТ из профиля (админ) ──
 @router.callback_query(F.data.startswith("adm_give_nft_"))
 async def adm_give_nft(call: CallbackQuery):
@@ -1185,6 +1263,9 @@ async def adm_user_hist(call: CallbackQuery):
 async def adm_stats(call: CallbackQuery):
     if not await is_admin(call.from_user.id):
         return await call.answer("❌", show_alert=True)
+    perms = await get_admin_permissions(call.from_user.id)
+    if not _has_perm(perms, "stats"):
+        return await call.answer("❌ Нет прав", show_alert=True)
     total = await count_users_all()
     active = await count_users()
     online = await get_online_count()
@@ -1213,6 +1294,9 @@ async def adm_stats(call: CallbackQuery):
 async def adm_chat_logs(call: CallbackQuery):
     if not await is_admin(call.from_user.id):
         return await call.answer("❌", show_alert=True)
+    perms = await get_admin_permissions(call.from_user.id)
+    if not _has_perm(perms, "chat_logs"):
+        return await call.answer("❌ Нет прав", show_alert=True)
     active = await get_all_active_chats()
     kb = []
     if active:
@@ -1514,7 +1598,7 @@ async def adm_order_approve(call: CallbackQuery):
         reward_text = f"💢 +{fnum(clicks)} Тохн выдано!"
     elif pkg_type == "vip" and pkg_id in VIP_PACKAGES:
         mc, mi, dur, _, label = VIP_PACKAGES[pkg_id]
-        vip_name = "VIP" if mc == 2 and mi == 1 else "Premium"
+        vip_name = "VIP" if mc == 2 else "Premium"  # VIP: 2,0.5 | Premium: 3,2
         await set_user_vip(uid, vip_name, mc, mi, dur)
         dur_text = f"{dur} дней" if dur > 0 else "навсегда"
         reward_text = f"⭐ {vip_name} выдан ({dur_text})"
@@ -1726,6 +1810,9 @@ async def _adm_render_settings_page(call: CallbackQuery, page: int = 0):
 async def adm_settings(call: CallbackQuery):
     if not await is_admin(call.from_user.id):
         return await call.answer("❌", show_alert=True)
+    perms = await get_admin_permissions(call.from_user.id)
+    if not _has_perm(perms, "settings"):
+        return await call.answer("❌ Нет прав", show_alert=True)
     await _adm_render_settings_page(call, 0)
 
 
@@ -1963,12 +2050,11 @@ async def adm_nft_view(call: CallbackQuery):
     text = (
         f"<b>📋 НФТ #{t['id']}</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
         f"📛 Название: <b>{t['name']}</b>\n"
-        f"📂 Коллекция: #{t['collection_num']}\n"
+        f"📂 Коллекция: <b>#{t['collection_num']}</b>\n"
         f"✨ Редкость: {emoji} {t['rarity_name']} ({t['rarity_pct']}%)\n"
-        f"💰 Доход: <b>{fnum(t['income_per_hour'])}</b>/ч\n"
+        f"💰 Доход: <b>{fnum(t['income_per_hour'])}</b>/ч\n\n\n"
         f"🏷 Цена: {fnum(t['price'])} 💢\n"
-        f"👤 Создатель: {t['created_by']}\n"
-        f"📅 Создан: {(t['created_at'] or '')[:10]}\n\n━━━━━━━━━━━━━━━━━━━"
+        f"👤 Создатель: {t['created_by']}\n\n━━━━━━━━━━━━━━━━━━━"
     )
     await call.message.edit_text(text, reply_markup=owner_nft_detail_kb(tid, 0, prefix="adm"), parse_mode="HTML")
     await call.answer()
@@ -2011,6 +2097,9 @@ async def adm_nft_del(call: CallbackQuery):
 async def adm_logs(call: CallbackQuery):
     if not await is_admin(call.from_user.id):
         return await call.answer("❌", show_alert=True)
+    perms = await get_admin_permissions(call.from_user.id)
+    if not _has_perm(perms, "logs"):
+        return await call.answer("❌ Нет прав", show_alert=True)
     await call.message.edit_text(
         "<b>📝 Логи</b>\n━━━━━━━━━━━━━━━━━━━\n\nВыберите тип:",
         reply_markup=admin_logs_kb(),

@@ -20,7 +20,6 @@ from database import (
 from keyboards import (
     my_nft_kb, nft_detail_kb, nft_delete_confirm_kb,
     nft_sell_confirm_kb, back_menu_kb, market_menu_kb,
-    nft_marketplace_kb, nft_buy_confirm_kb,
 )
 from handlers.common import fnum
 from banners_util import send_msg, safe_edit
@@ -35,6 +34,16 @@ def _rarity_emoji(rn: str) -> str:
 # ── Мои НФТ ──
 @router.callback_query(F.data == "my_nft")
 async def my_nft(call: CallbackQuery, state: FSMContext):
+    await _show_my_nft_page(call, state, 0)
+
+
+@router.callback_query(F.data.startswith("my_nft_pg:"))
+async def my_nft_page(call: CallbackQuery, state: FSMContext):
+    page = int(call.data.split(":")[1])
+    await _show_my_nft_page(call, state, page)
+
+
+async def _show_my_nft_page(call: CallbackQuery, state: FSMContext, page: int):
     uid = call.from_user.id
     await state.clear()
     await set_user_online(uid)
@@ -56,7 +65,7 @@ async def my_nft(call: CallbackQuery, state: FSMContext):
         "━━━━━━━━━━━━━━━━━━━"
     )
 
-    await send_msg(call, text, reply_markup=my_nft_kb(nfts, max_slots))
+    await send_msg(call, text, reply_markup=my_nft_kb(nfts, max_slots, page))
 
 
 # ── Детали НФТ ──
@@ -86,13 +95,13 @@ async def nft_info(call: CallbackQuery):
     is_pinned = pinned is not None and int(pinned[0]) == un_id
 
     text = (
-        f"<b>📋 НФТ  ·  {name}</b>\n"
+        f"<b>📋 НФТ</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📛 Название: <b>{name}</b>\n"
         f"📂 Коллекция: <b>#{collection_num}</b>\n"
         f"✨ Редкость: {emoji} {rarity_name} ({rarity_pct}%)\n"
-        f"💰 Доход: <b>{fnum(income)}</b>/ч\n"
+        f"💰 Доход: <b>{fnum(income)}</b>/ч\n\n\n"
         f"🏷 Цена: {fnum(bought_price)} 💢\n"
-        f"📅 Получен: {created_at[:10] if created_at else '—'}\n"
     )
     if is_pinned:
         text += "\n📌 <b>ЗАКРЕПЛЁН В ПРОФИЛЕ</b>\n"
@@ -131,7 +140,7 @@ async def nft_del_confirm(call: CallbackQuery):
     await log_activity(uid, "nft", f"Удалил НФТ #{un_id} за {NFT_DELETE_COST}")
     await create_transaction("nft_sell", uid, amount=NFT_DELETE_COST, details=f"Удаление НФТ #{un_id}")
     await call.answer("✅ НФТ удалён!", show_alert=True)
-    # Вернуться к списку — показать НФТ без FSM
+    # Вернуться к списку
     nfts = await get_user_nfts(uid)
     max_slots = await get_user_nft_slots(uid)
     count = len(nfts)
@@ -143,7 +152,7 @@ async def nft_del_confirm(call: CallbackQuery):
         f"📈 Доход НФТ: <b>{fnum(total_income)}</b>/ч\n\n"
         "━━━━━━━━━━━━━━━━━━━"
     )
-    await send_msg(call, text, reply_markup=my_nft_kb(nfts, max_slots))
+    await send_msg(call, text, reply_markup=my_nft_kb(nfts, max_slots, 0))
 
 
 # ── Продажа ──
@@ -165,8 +174,8 @@ async def nft_sell_start(call: CallbackQuery, state: FSMContext):
     text = (
         f"<b>💰 Продажа НФТ</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📛 <b>{name}</b>\n"
-        f"✨ {emoji} {rarity_name} ({rarity_pct}%)\n"
+        f"📛 Название: <b>{name}</b>\n"
+        f"✨ Редкость: {emoji} {rarity_name} ({rarity_pct}%)\n"
         f"💰 Доход: <b>{fnum(income)}</b>/ч\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"✏️ Введите цену продажи (число):"
@@ -225,13 +234,13 @@ async def nft_unsell(call: CallbackQuery):
     on_sale = await get_nft_on_sale(un_id)
     emoji = _rarity_emoji(rarity_name)
     text = (
-        f"<b>🎨 НФТ  ·  {name}</b>\n"
+        f"<b>📋 НФТ</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📛 Название: <b>{name}</b>\n"
         f"📂 Коллекция: <b>#{collection_num}</b>\n"
-        f"✨ {emoji} {rarity_name} ({rarity_pct}%)\n"
-        f"💰 Доход: <b>{fnum(income)}</b>/ч\n"
+        f"✨ Редкость: {emoji} {rarity_name} ({rarity_pct}%)\n"
+        f"💰 Доход: <b>{fnum(income)}</b>/ч\n\n\n"
         f"🏷 Цена: {fnum(bought_price)} 💢\n"
-        f"📅 Получен: {created_at[:10] if created_at else '—'}\n"
     )
     if on_sale:
         text += "\n📢 <b>ВЫСТАВЛЕН НА ПРОДАЖУ</b>\n"
@@ -256,17 +265,16 @@ async def nft_pin(call: CallbackQuery):
     rarity_name = nft[8]
     bought_price = nft[3]
     collection_num = nft[10]
-    created_at = nft[4]
     emoji = _rarity_emoji(rarity_name)
     on_sale = await get_nft_on_sale(un_id)
     text = (
-        f"<b>📋 НФТ  ·  {name}</b>\n"
+        f"<b>📋 НФТ</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📛 Название: <b>{name}</b>\n"
         f"📂 Коллекция: <b>#{collection_num}</b>\n"
         f"✨ Редкость: {emoji} {rarity_name} ({rarity_pct}%)\n"
-        f"💰 Доход: <b>{fnum(income)}</b>/ч\n"
+        f"💰 Доход: <b>{fnum(income)}</b>/ч\n\n\n"
         f"🏷 Цена: {fnum(bought_price)} 💢\n"
-        f"📅 Получен: {created_at[:10] if created_at else '—'}\n"
         "\n📌 <b>ЗАКРЕПЛЁН В ПРОФИЛЕ</b>\n"
     )
     if on_sale:
@@ -290,17 +298,16 @@ async def nft_unpin(call: CallbackQuery):
     rarity_name = nft[8]
     bought_price = nft[3]
     collection_num = nft[10]
-    created_at = nft[4]
     emoji = _rarity_emoji(rarity_name)
     on_sale = await get_nft_on_sale(un_id)
     text = (
-        f"<b>📋 НФТ  ·  {name}</b>\n"
+        f"<b>📋 НФТ</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📛 Название: <b>{name}</b>\n"
         f"📂 Коллекция: <b>#{collection_num}</b>\n"
         f"✨ Редкость: {emoji} {rarity_name} ({rarity_pct}%)\n"
-        f"💰 Доход: <b>{fnum(income)}</b>/ч\n"
+        f"💰 Доход: <b>{fnum(income)}</b>/ч\n\n\n"
         f"🏷 Цена: {fnum(bought_price)} 💢\n"
-        f"📅 Получен: {created_at[:10] if created_at else '—'}\n"
     )
     if on_sale:
         text += "\n📢 <b>ВЫСТАВЛЕН НА ПРОДАЖУ</b>\n"
@@ -328,8 +335,12 @@ async def market_menu(call: CallbackQuery):
 async def nft_market_page(call: CallbackQuery):
     page = int(call.data.replace("nftp_", ""))
     total = await count_market_listings()
-    per_page = 5
+    per_page = 1
     total_pages = max(1, math.ceil(total / per_page))
+    if page < 0:
+        page = 0
+    if page >= total_pages:
+        page = total_pages - 1
     items = await get_market_listings(page, per_page)
 
     if not items:
@@ -340,15 +351,46 @@ async def nft_market_page(call: CallbackQuery):
             pass
         return await call.answer()
 
-    text = f"<b>🛒 НФТ НА ПРОДАЖЕ</b> ({total} шт.)\n━━━━━━━━━━━━━━━━━━━\n"
+    item = items[0]
+    listing_id = item[0]
+    name = item[5]
+    rarity_name = item[6]
+    rarity_pct = item[7]
+    income = item[8]
+    price = item[4]
+    collection_num = item[9]
+    emoji = _rarity_emoji(rarity_name)
+
+    text = (
+        f"<b>🛒 НФТ НА ПРОДАЖЕ</b> ({total} шт.)\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n\n"
+        f"📛 Название: <b>{name}</b>\n"
+        f"📂 Коллекция: <b>#{collection_num}</b>\n"
+        f"✨ Редкость: {emoji} {rarity_name} ({rarity_pct}%)\n"
+        f"💰 Доход: <b>{fnum(income)}</b>/ч\n\n\n"
+        f"🏷 Цена: <b>{fnum(price)}</b> 💢\n\n"
+        f"━━━━━━━━━━━━━━━━━━━"
+    )
+
+    # Пагинация: ▶️⏭️ 📂 1/N ⏮️◀️
+    kb = []
+    nav = []
+    nav.append(InlineKeyboardButton(text="▶️", callback_data=f"nftp_{min(page + 1, total_pages - 1)}"))
+    nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"nftp_{total_pages - 1}"))
+    nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+    nav.append(InlineKeyboardButton(text="⏮️", callback_data="nftp_0"))
+    nav.append(InlineKeyboardButton(text="◀️", callback_data=f"nftp_{max(page - 1, 0)}"))
+    kb.append(nav)
+    kb.append([InlineKeyboardButton(text="⬅️ Площадка", callback_data="market_menu")])
+
     try:
-        await call.message.edit_text(text, reply_markup=nft_marketplace_kb(items, page, total_pages))
+        await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
     except Exception:
         pass
     await call.answer()
 
 
-# ── Просмотр листинга ──
+# ── Просмотр листинга (купить) ──
 @router.callback_query(F.data.startswith("nftv_market_"))
 async def nft_market_view(call: CallbackQuery):
     listing_id = int(call.data.replace("nftv_market_", ""))
@@ -371,14 +413,54 @@ async def nft_market_view(call: CallbackQuery):
     text = (
         f"<b>📋 НФТ на площадке</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📛 <b>{row['name']}</b>\n"
-        f"📂 Коллекция: #{row['collection_num']}\n"
-        f"✨ {emoji} {row['rarity_name']} ({row['rarity_pct']}%)\n"
-        f"💰 Доход: <b>{fnum(row['income_per_hour'])}</b>/ч\n"
+        f"📛 Название: <b>{row['name']}</b>\n"
+        f"📂 Коллекция: <b>#{row['collection_num']}</b>\n"
+        f"✨ Редкость: {emoji} {row['rarity_name']} ({row['rarity_pct']}%)\n"
+        f"💰 Доход: <b>{fnum(row['income_per_hour'])}</b>/ч\n\n\n"
         f"🏷 Цена: <b>{fnum(row['price'])}</b> 💢\n\n"
         f"━━━━━━━━━━━━━━━━━━━"
     )
-    await safe_edit(call.message, text, reply_markup=nft_buy_confirm_kb(listing_id))
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛍 Купить", callback_data=f"nft_buy_ask_{listing_id}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="nftp_0")],
+    ])
+    await safe_edit(call.message, text, reply_markup=kb)
+    await call.answer()
+
+
+# ── Подтверждение покупки ──
+@router.callback_query(F.data.startswith("nft_buy_ask_"))
+async def nft_buy_ask(call: CallbackQuery):
+    listing_id = int(call.data.replace("nft_buy_ask_", ""))
+    from database import get_db
+    import aiosqlite
+    db = await get_db()
+    db.row_factory = aiosqlite.Row
+    cur = await db.execute(
+        """SELECT m.id, m.price, t.name
+           FROM nft_market m JOIN nft_templates t ON m.nft_id = t.id
+           WHERE m.id = ? AND m.status = 'open'""",
+        (listing_id,),
+    )
+    row = await cur.fetchone()
+    if not row:
+        return await call.answer("❌ Не найден", show_alert=True)
+
+    text = (
+        f"❓ <b>Подтвердите покупку</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📛 <b>{row['name']}</b>\n"
+        f"🏷 Цена: <b>{fnum(row['price'])}</b> 💢\n\n"
+        f"Вы уверены?\n\n"
+        f"━━━━━━━━━━━━━━━━━━━"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да", callback_data=f"nftb_market_{listing_id}"),
+            InlineKeyboardButton(text="❌ Нет", callback_data=f"nftv_market_{listing_id}"),
+        ],
+    ])
+    await safe_edit(call.message, text, reply_markup=kb)
     await call.answer()
 
 
@@ -394,13 +476,5 @@ async def nft_market_buy(call: CallbackQuery):
     await create_transaction("market_buy", uid, amount=0, details=f"Покупка с маркета #{listing_id}")
     await call.answer("✅ НФТ куплен!", show_alert=True)
     # Перейти к маркету (page=0)
-    total = await count_market_listings()
-    per_page = 5
-    total_pages = max(1, math.ceil(total / per_page))
-    items = await get_market_listings(0, per_page)
-    if not items:
-        text = "<b>🏠 Площадка пуста</b>\n\nВыставьте свои НФТ на продажу!"
-        await call.message.edit_text(text, reply_markup=market_menu_kb())
-    else:
-        text = f"<b>🛒 НФТ НА ПРОДАЖЕ</b> ({total} шт.)\n━━━━━━━━━━━━━━━━━━━\n"
-        await call.message.edit_text(text, reply_markup=nft_marketplace_kb(items, 0, total_pages))
+    call.data = "nftp_0"
+    await nft_market_page(call)

@@ -58,6 +58,8 @@ class OwnerStates(StatesGroup):
     msg_to_user = State()
     # Добавить значение (клики/доход/сила/ёмкость/слот)
     waiting_add_value = State()
+    # Настройка доната
+    waiting_donate_value = State()
 
 
 # ━━━━━━━━━━━━━━━━━━━ Панель администратора ━━━━━━━━━━━━━━━━━━━
@@ -96,6 +98,7 @@ class AdminStates(StatesGroup):
 class EventStates(StatesGroup):
     waiting_name = State()
     waiting_nft_name = State()
+    waiting_collection = State()
     waiting_rarity = State()
     waiting_income = State()
     waiting_bet = State()
@@ -139,10 +142,11 @@ class TradeStates(StatesGroup):
 
 # ━━━━━━━━━━━━━━━━━━━ Оплата ━━━━━━━━━━━━━━━━━━━
 class PaymentStates(StatesGroup):
-    waiting_fio = State()        # шаг 1: ввод ФИО отправителя
-    waiting_screenshot = State() # шаг 2: скриншот чека
-    confirming = State()         # подтверждение перед отправкой
-    reply_to_owner = State()     # пользователь отвечает владельцу по заказу
+    waiting_paid_confirm = State()  # шаг 1: вы оплатили?
+    waiting_fio = State()           # шаг 2: ввод Фамилия Имя
+    waiting_screenshot = State()    # шаг 3: скриншот чека
+    confirming = State()            # подтверждение перед отправкой
+    reply_to_owner = State()        # пользователь отвечает владельцу по заказу
 
 
 # ━━━━━━━━━━━━━━━━━━━ Админ-права ━━━━━━━━━━━━━━━━━━━

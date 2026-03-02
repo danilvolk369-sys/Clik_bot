@@ -76,16 +76,15 @@ async def _profile_text(user, total_users: int) -> str:
     if rank_id >= len(RANK_THRESHOLDS):
         nxt_thresh = cur_thresh
 
-    bar, pct = _progress_bar(current_clicks - cur_thresh, nxt_thresh - cur_thresh)
+    progress_cur = current_clicks - cur_thresh
+    progress_max = nxt_thresh - cur_thresh
+    bar, pct = _progress_bar(progress_cur, progress_max)
 
-    uid = user["user_id"]
     uname = user["username"]
     name_line = f"@{uname}" if uname else "Аноним"
-    name_line += f"  (ID: {uid})"
 
     nft_count = await count_user_nfts(uid)
     max_slots = await get_user_nft_slots(uid)
-    online = await get_online_count()
     likes = await get_user_likes_count(uid)
 
     # Доход
@@ -105,29 +104,23 @@ async def _profile_text(user, total_users: int) -> str:
         try:
             last_dt = _dt.fromisoformat(last_claim)
             diff = (_dt.now() - last_dt).total_seconds()
-            hours = diff / 3600.0
+            capped = min(diff, 600)  # макс 10 мин
+            hours = capped / 3600.0
             accumulated = min(total_income * hours, capacity)
         except (ValueError, TypeError):
             accumulated = 0.0
 
+    # VIP / Premium статус
     vip = user["vip_type"] if user else None
-    vip_line = ""
     if vip:
         exp = user["vip_expires"]
-        if exp == "permanent":
-            exp_str = "навсегда"
-        elif exp:
-            exp_str = f"до {exp[:10]}"
-        else:
-            exp_str = ""
         emoji = "💎" if vip.lower() == "premium" else "⭐"
         bonuses = []
         if mc > 1:
-            bonuses.append(f"×{mc:.0f} клик")
-        if mi > 1:
-            bonuses.append(f"×{mi:.0f} доход")
+            bonuses.append(f"×{mc:g} клик")
+        if mi != 1:
+            bonuses.append(f"×{mi:g} доход")
         bonus_str = ", ".join(bonuses) if bonuses else ""
-        # форматируем дату DD.MM.YYYY
         if exp == "permanent":
             exp_str = "навсегда"
         elif exp:
@@ -139,24 +132,28 @@ async def _profile_text(user, total_users: int) -> str:
                 exp_str = f"до {exp[:10]}"
         else:
             exp_str = ""
-        vip_line = f"{emoji} Статус: {vip.upper()} ({bonus_str}) — {exp_str}\n"
+        vip_line = f"{emoji} Статус: {vip.upper()} ({bonus_str}) — {exp_str}"
+    else:
+        vip_line = "⭐ Статус: не активен"
 
     return (
-        f"<b>💢 КликТохн</b>  ·  Главное меню\n"
+        f"<b>💢 КликТохн</b> [ Главное меню ]\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👤 <b>{name_line}</b>\n"
-        f"🪪 {rank_name}\n"
-        f"{vip_line}"
-        f"\n"
+        f"👤 <b>{name_line}</b>  (ID: <code>{uid}</code>)\n"
+        f"{vip_line}\n"
+        f"\n\n"
         f"💢 Баланс: <b>{fnum(user['clicks'])}</b> Тохн\n"
-        f"⚡ Клик: <b>+{fnum(display_power)}</b> Тохн\n"
+        f"⚡ Клик: <b>+{fnum(display_power)}</b> Тохн\n\n"
         f"📈 Доход: <b>{fnum(total_income)}</b>/ч\n"
-        f"📦 Копилка: {fnum(accumulated)} / {fnum(capacity)}\n"
-        f"🎨 НФТ: {nft_count}/{max_slots}\n\n"
-        f"▸ <b>Прогресс</b>\n"
-        f"  {bar}\n"
-        f"  {fnum(current_clicks)} / {fnum(nxt_thresh)} кликов\n\n"
-        f"🔗 Рефералов: {user['referrals']}  ·  ❤️ Лайков: {likes}  ·  🟢 Онлайн: {online}\n"
+        f"📦 Емкость: {fnum(accumulated)} / {fnum(capacity)}\n"
+        f"🎨 НФТ: {nft_count}/{max_slots}\n"
+        f"\n\n"
+        f"🪪 Ранг: {rank_name}\n"
+        f"▸ Прогресс {bar}\n"
+        f"\n\n"
+        f"🔗 Рефералов: {user['referrals']}\n"
+        f"❤️ Лайков: {likes}\n"
+        f"👥 Участников: {total_users}\n"
         f"━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -260,18 +257,15 @@ async def claim_income(call: CallbackQuery):
         except (ValueError, TypeError):
             last_dt = datetime.now()
         diff = (datetime.now() - last_dt).total_seconds()
-        hours = diff / 3600.0
+        capped = min(diff, 600)  # макс 10 мин
+        hours = capped / 3600.0
         accumulated = min(income_rate * hours, capacity)
-        h = int(hours)
-        m = int((hours - h) * 60)
-        if h >= 24:
-            d = h // 24
-            h = h % 24
-            time_str = f"{d}д {h}ч {m}м"
-        elif h > 0:
-            time_str = f"{h}ч {m}м"
+        m = int(capped // 60)
+        s = int(capped % 60)
+        if m > 0:
+            time_str = f"{m}м {s:02d}с"
         else:
-            time_str = f"{m}м" if m > 0 else "<1м"
+            time_str = f"{s}с" if s > 0 else "&lt;1с"
 
     fill_pct = min(int(accumulated / capacity * 100), 100) if capacity > 0 else 0
     filled = fill_pct // 10
@@ -335,16 +329,14 @@ async def do_claim_income(call: CallbackQuery):
     nft_count = await count_user_nfts(uid)
     max_slots = await get_user_nft_slots(uid)
 
-    h = int(hours)
-    m = int((hours - h) * 60)
-    if h >= 24:
-        d = h // 24
-        h = h % 24
-        time_str = f"{d}д {h}ч {m}м"
-    elif h > 0:
-        time_str = f"{h}ч {m}м"
+    # hours уже ограничен 10 мин в claim_passive_income
+    total_sec = hours * 3600
+    m = int(total_sec // 60)
+    s = int(total_sec % 60)
+    if m > 0:
+        time_str = f"{m}м {s:02d}с"
     else:
-        time_str = f"{m}м" if m > 0 else "<1м"
+        time_str = f"{s}с" if s > 0 else "&lt;1с"
 
     text = (
         "<b>💵 Доход собран!</b>\n"
@@ -388,12 +380,13 @@ async def menu_page(call: CallbackQuery, state: FSMContext):
     txt = await _profile_text(user, total)
     kb = main_menu_kb(page)
     try:
-        await call.message.edit_caption(caption=txt, reply_markup=kb)
-    except Exception:
-        try:
+        # Если сообщение с фото — edit_caption
+        if call.message.photo:
+            await call.message.edit_caption(caption=txt, reply_markup=kb)
+        else:
             await safe_edit(call.message, txt, reply_markup=kb)
-        except Exception:
-            pass
+    except Exception:
+        pass
     await call.answer()
 
 
@@ -616,11 +609,11 @@ async def dialog_reply_send(message: Message, state: FSMContext):
 
 
 # ══════════════════════════════════════════
-#  АУКЦИОН (для участников)
+#  АУКЦИОН (broadcast-модель для участников)
 # ══════════════════════════════════════════
 from datetime import datetime as _dtm
 from states import EventBidStates
-from keyboards import auction_list_kb, auction_detail_kb
+from keyboards import auction_broadcast_kb, auction_joined_kb
 from config import NFT_RARITIES, NFT_RARITY_EMOJI
 
 _MEDALS = ["🥇", "🥈", "🥉"]
@@ -646,27 +639,70 @@ def _time_left_str(ends_at: str) -> str:
         return "⏱ ?"
 
 
-@router.callback_query(F.data == "auc_list")
-async def auc_list(call: CallbackQuery):
-    uid = call.from_user.id
-    user = await get_user(uid)
-    if not user:
-        return await call.answer("❌ /start", show_alert=True)
-    events = await get_active_events()
-    text = (
-        "<b>🎪 Аукционы</b>\n"
-        "━━━━━━━━━━━━━━━━━━━\n\n"
+def _build_auction_card(event, parts=None, my_bid=None) -> str:
+    """Красивая карточка аукциона (для broadcast/обновления)."""
+    p_count = len(parts) if parts else 0
+    rn = event["nft_rarity"] if isinstance(event["nft_rarity"], str) else "Обычный"
+    emoji = NFT_RARITY_EMOJI.get(rn, "🎨")
+    timer = _time_left_str(event["ends_at"]) if event["ends_at"] else ""
+
+    try:
+        col = event['nft_collection'] or ''
+    except (KeyError, IndexError):
+        col = ''
+    col_line = f"  📂 Коллекция: <b>{col}</b>\n" if col else ""
+
+    # Список участников (отсортирован по ставке DESC из БД)
+    p_lines = []
+    if parts:
+        for i, p in enumerate(parts[:10], 1):
+            p_uid = p[0] if isinstance(p, tuple) else p["user_id"]
+            p_bid = p[1] if isinstance(p, tuple) else p["bid_amount"]
+            p_name = p[2] if isinstance(p, tuple) else (p["username"] if p["username"] else "?")
+            medal = _MEDALS[i - 1] if i <= 3 else f"{i}."
+            p_lines.append(f"  {medal} @{p_name or '???'} (<code>{p_uid}</code>) — {fnum(p_bid)} 💢")
+    p_text = "\n".join(p_lines) if p_lines else "  Пока нет участников"
+
+    warn = ""
+    if p_count < 2:
+        warn = "\n⚠️ <i>Нужно мин. 2 участника (иначе — отмена и возврат)</i>\n"
+
+    bid_line = ""
+    if my_bid is not None:
+        bid_line = f"\n✅ <b>Ваша ставка:</b> {fnum(my_bid)} 💢"
+
+    return (
+        f"🎪 <b>НОВЫЙ АУКЦИОН!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"  📛 Название: <b>{event['nft_prize_name']}</b>\n"
+        f"{col_line}"
+        f"  ✨ Редкость: {emoji} <b>{rn}</b>\n"
+        f"  💰 Доход: <b>{fnum(event['nft_income'])}</b>/ч\n\n"
+        f"💵 Мин. ставка: <b>{fnum(event['bet_amount'])}</b> 💢\n"
+        f"⏳ Длительность: {timer}\n"
+        f"👥 Участников: <b>{p_count}/{event['max_participants']}</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 <b>Соревнование:</b>\n{p_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━"
+        f"{warn}{bid_line}\n\n"
+        f"🏆 Победитель получает НФТ!\n"
+        f"❌ Проигравшие теряют ставки"
     )
-    if events:
-        text += f"Активных: <b>{len(events)}</b>\nВыберите для участия:"
-    else:
-        text += "Нет активных аукционов.\nОжидайте новых!"
-    await safe_edit(call.message, text, reply_markup=auction_list_kb(events))
+
+
+@router.callback_query(F.data.startswith("auc_ignore:"))
+async def auc_ignore(call: CallbackQuery):
+    """Пользователь нажал «Игнорировать» — удаляем сообщение."""
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("auc_view:"))
 async def auc_view(call: CallbackQuery):
+    """Обновить карточку аукциона в broadcast-сообщении."""
     uid = call.from_user.id
     user = await get_user(uid)
     if not user:
@@ -677,46 +713,12 @@ async def auc_view(call: CallbackQuery):
         return await call.answer("❌ Аукцион завершён или не найден", show_alert=True)
 
     parts = await get_event_participants(eid)
-    p_count = len(parts)
     my_bid = await get_user_event_bid(eid, uid)
     user_joined = my_bid is not None
 
-    rn = event["nft_rarity"] if isinstance(event["nft_rarity"], str) else "Обычный"
-    emoji = NFT_RARITY_EMOJI.get(rn, "🎨")
-    timer = _time_left_str(event["ends_at"]) if event["ends_at"] else "?"
-
-    top_lines = []
-    for i, p in enumerate(parts[:5], 1):
-        p_uid = p[0] if isinstance(p, tuple) else p["user_id"]
-        p_bid = p[1] if isinstance(p, tuple) else p["bid_amount"]
-        p_name = p[2] if isinstance(p, tuple) else p.get("username", "?")
-        medal = _MEDALS[i - 1] if i <= 3 else f"{i}."
-        top_lines.append(f"  {medal} @{p_name or '???'} — {fnum(p_bid)} 💢")
-
-    top_text = "\n".join(top_lines) if top_lines else "  Пока нет участников"
-
-    min_req = "⚠️ Нужно мин. 2 участника (иначе — отмена и возврат)" if p_count < 2 else ""
-
-    text = (
-        f"<b>🎪 {event['name']}</b>\n"
-        "━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🎨 Приз: <b>{event['nft_prize_name']}</b>\n"
-        f"{emoji} Редкость: {rn}\n"
-        f"💰 Доход: {fnum(event['nft_income'])}/ч\n"
-        f"💵 Мин. ставка: {fnum(event['bet_amount'])} 💢\n"
-        f"👥 Участники: {p_count}/{event['max_participants']}\n"
-        f"{timer}\n\n"
-        f"🏆 <b>ТОП СТАВОК:</b>\n{top_text}\n"
-    )
-    if min_req:
-        text += f"\n{min_req}\n"
-    if user_joined:
-        text += f"\n✅ Ваша ставка: <b>{fnum(my_bid)}</b> 💢"
-    else:
-        text += "\n❌ Вы ещё не участвуете"
-    text += "\n━━━━━━━━━━━━━━━━━━━"
-
-    await safe_edit(call.message, text, reply_markup=auction_detail_kb(eid, user_joined))
+    text = _build_auction_card(event, parts, my_bid)
+    kb = auction_joined_kb(eid) if user_joined else auction_broadcast_kb(eid)
+    await safe_edit(call.message, text, reply_markup=kb)
     await call.answer()
 
 
@@ -731,7 +733,6 @@ async def auc_join(call: CallbackQuery):
     if not event or event["status"] != "active":
         return await call.answer("❌ Аукцион завершён", show_alert=True)
 
-    # Проверки
     existing_bid = await get_user_event_bid(eid, uid)
     if existing_bid is not None:
         return await call.answer("✅ Вы уже участвуете!", show_alert=True)
@@ -742,17 +743,22 @@ async def auc_join(call: CallbackQuery):
 
     min_bet = float(event["bet_amount"])
     if float(user["clicks"]) < min_bet:
-        return await call.answer(f"❌ Нужно {fnum(min_bet)} 💢 для участия", show_alert=True)
+        return await call.answer(f"❌ Нужно {fnum(min_bet)} 💢", show_alert=True)
 
-    # Присоединиться
     ok = await join_event(eid, uid, min_bet)
     if not ok:
         return await call.answer("❌ Ошибка при участии", show_alert=True)
 
     await log_activity(uid, "auction_join", f"Аукцион #{eid}, ставка {fnum(min_bet)}")
     await call.answer(f"✅ Вы вступили! Ставка: {fnum(min_bet)} 💢", show_alert=True)
-    # Обновить вид
-    await auc_view(call)
+
+    # Обновить карточку — показать кнопку «Повысить ставку»
+    parts = await get_event_participants(eid)
+    text = _build_auction_card(event, parts, min_bet)
+    try:
+        await call.message.edit_text(text, reply_markup=auction_joined_kb(eid), parse_mode="HTML")
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("auc_raise:"))
@@ -770,9 +776,9 @@ async def auc_raise(call: CallbackQuery, state: FSMContext):
     await state.set_state(EventBidStates.waiting_bid)
     await state.update_data(auc_event_id=eid, auc_current_bid=my_bid)
     await call.message.edit_text(
-        f"<b>⬆️ Повысить ставку</b>\n"
+        f"<b>💰 Добавить сумму</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Текущая: <b>{fnum(my_bid)}</b> 💢\n\n"
+        f"Текущая ставка: <b>{fnum(my_bid)}</b> 💢\n\n"
         "Введите новую общую ставку\n"
         "(должна быть выше текущей):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -802,7 +808,7 @@ async def auc_bid_input(message: Message, state: FSMContext):
         return await message.answer(
             f"❌ Ставка должна быть выше {fnum(current_bid)} 💢",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎪 К аукциону", callback_data=f"auc_view:{eid}")],
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data=f"auc_view:{eid}")],
             ]),
         )
 
@@ -813,7 +819,7 @@ async def auc_bid_input(message: Message, state: FSMContext):
             f"❌ Не хватает {fnum(additional)} 💢\n"
             f"У вас: {fnum(user['clicks'])} 💢",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎪 К аукциону", callback_data=f"auc_view:{eid}")],
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data=f"auc_view:{eid}")],
             ]),
         )
 
@@ -824,9 +830,10 @@ async def auc_bid_input(message: Message, state: FSMContext):
     await update_event_bid(eid, uid, new_bid, additional)
     await log_activity(uid, "auction_raise", f"Аукцион #{eid}, ставка {fnum(new_bid)}")
     await message.answer(
-        f"✅ Ставка повышена до {fnum(new_bid)} 💢!\n"
+        f"✅ Ставка повышена до <b>{fnum(new_bid)}</b> 💢!\n"
         f"Списано: {fnum(additional)} 💢",
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🎪 К аукциону", callback_data=f"auc_view:{eid}")],
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data=f"auc_view:{eid}")],
         ]),
     )

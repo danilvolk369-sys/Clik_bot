@@ -193,11 +193,11 @@ def owner_orders_kb(orders, page, total_pages, prefix="owner"):
         )])
     nav = []
     if total_pages > 1:
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{orders_cb}:{page-1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{orders_cb}:{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{orders_cb}:{total_pages - 1}"))
         nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{orders_cb}:{page+1}"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{orders_cb}:0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{orders_cb}:{max(page - 1, 0)}"))
     if nav:
         kb.append(nav)
     kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data=panel_cb)])
@@ -227,7 +227,6 @@ def minigames_menu_kb():
             InlineKeyboardButton(text="⚔️ PvP", callback_data="pvp_menu"),
             InlineKeyboardButton(text="💬 Чат", callback_data="chat_menu"),
         ],
-        [InlineKeyboardButton(text="🎪 Аукционы", callback_data="auc_list")],
         [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
     ])
 
@@ -240,6 +239,8 @@ def rating_kb():
         [InlineKeyboardButton(text="🥉 Топ 7—9", callback_data="top_range:2")],
         [InlineKeyboardButton(text="🏅 Топ 10—12", callback_data="top_range:3")],
         [InlineKeyboardButton(text="⭐ Топ 13—15", callback_data="top_range:4")],
+        [InlineKeyboardButton(text="🔥 Топ 16—18", callback_data="top_range:5")],
+        [InlineKeyboardButton(text="💎 Топ 19—20", callback_data="top_range:6")],
         [InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")],
     ])
 
@@ -415,9 +416,24 @@ def back_menu_kb():
 
 
 # ━━━━━━━━━━━━  МОИ НФТ  ━━━━━━━━━━━━
-def my_nft_kb(user_nfts: list, max_nft: int = 5):
+NFT_PER_PAGE = 5
+
+
+def my_nft_kb(user_nfts: list, max_nft: int = 5, page: int = 0):
+    import math
+    total_nfts = len(user_nfts)
+    total_pages = max(1, math.ceil(total_nfts / NFT_PER_PAGE)) if total_nfts > 0 else 1
+    if page < 0:
+        page = 0
+    if page >= total_pages:
+        page = total_pages - 1
+
+    start = page * NFT_PER_PAGE
+    end = start + NFT_PER_PAGE
+    page_nfts = user_nfts[start:end]
+
     kb = []
-    for idx, nft in enumerate(user_nfts, 1):
+    for idx, nft in enumerate(page_nfts, start + 1):
         un_id = nft[0]
         name = nft[1]
         rarity_name = nft[4] if len(nft) > 4 else "Обычный"
@@ -426,11 +442,25 @@ def my_nft_kb(user_nfts: list, max_nft: int = 5):
             text=f"#{idx} {emoji} {rarity_name}  ·  {name}",
             callback_data=f"nft_info_{un_id}",
         )])
-    for i in range(len(user_nfts) + 1, max_nft + 1):
-        kb.append([InlineKeyboardButton(
-            text=f"#{i}  ── пусто ──",
-            callback_data="noop",
-        )])
+    # Пустые слоты на последней странице
+    if page == total_pages - 1:
+        shown = total_nfts
+        for i in range(shown + 1, min(shown + (NFT_PER_PAGE - len(page_nfts)) + 1, max_nft + 1)):
+            kb.append([InlineKeyboardButton(
+                text=f"#{i}  ── пусто ──",
+                callback_data="noop",
+            )])
+
+    # Пагинация: ▶️⏭️ 📂 1/N ⏮️◀️
+    if total_pages > 1:
+        nav = []
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"my_nft_pg:{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"my_nft_pg:{total_pages - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data="my_nft_pg:0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"my_nft_pg:{max(page - 1, 0)}"))
+        kb.append(nav)
+
     kb.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -535,11 +565,11 @@ def trade_menu_kb(trades: list, page: int, total_pages: int):
         )])
     nav = []
     if total_pages > 1:
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"trades_pg_{page - 1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"trades_pg_{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"trades_pg_{total_pages - 1}"))
         nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"trades_pg_{page + 1}"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data="trades_pg_0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"trades_pg_{max(page - 1, 0)}"))
         kb.append(nav)
     kb.append([
         InlineKeyboardButton(text="📥 Входящие", callback_data="trade_incoming"),
@@ -642,11 +672,11 @@ def owner_tickets_kb(tickets: list, page: int = 0, total_pages: int = 1):
         )])
     nav = []
     if total_pages > 1:
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"owner_tickets:{page - 1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"owner_tickets:{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"owner_tickets:{total_pages - 1}"))
         nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"owner_tickets:{page + 1}"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data="owner_tickets:0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"owner_tickets:{max(page - 1, 0)}"))
         kb.append(nav)
     kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -668,14 +698,12 @@ def owner_nft_list_kb(templates: list, page: int = 0, total_pages: int = 1, pref
         )])
     # Навигация
     nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{pg_pref}0"))
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{pg_pref}{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{pg_pref}{page+1}"))
-        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{pg_pref}{total_pages-1}"))
     if total_pages > 1:
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{pg_pref}{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{pg_pref}{total_pages - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{pg_pref}0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{pg_pref}{max(page - 1, 0)}"))
         kb.append(nav)
     kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data=panel_cb)])
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -729,11 +757,11 @@ def banned_list_kb(users: list, page: int, total_pages: int, prefix: str = "owne
         )])
     nav = []
     if total_pages > 1:
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{prefix}_banned:{page - 1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{prefix}_banned:{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{prefix}_banned:{total_pages - 1}"))
         nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{prefix}_banned:{page + 1}"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{prefix}_banned:0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{prefix}_banned:{max(page - 1, 0)}"))
         kb.append(nav)
     back_cb = "admin_panel" if prefix == "adm" else "owner_panel"
     kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)])
@@ -751,13 +779,13 @@ def users_list_kb(users: list, page: int, total_pages: int, prefix: str = "owner
             text=f"{status} {name}  ·  {int(clicks):,} 💢".replace(",", "."),
             callback_data=f"{prefix}_user_view_{uid}",
         )])
-    nav = []
     if total_pages > 1:
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{prefix}_users_pg:{page - 1}"))
+        nav = []
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{prefix}_users_pg:{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{prefix}_users_pg:{total_pages - 1}"))
         nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{prefix}_users_pg:{page + 1}"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{prefix}_users_pg:0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{prefix}_users_pg:{max(page - 1, 0)}"))
         kb.append(nav)
     back_cb = "admin_panel" if prefix == "adm" else "owner_panel"
     kb.append([InlineKeyboardButton(text="🔍 Поиск по ID", callback_data=f"{prefix}_user_search")])
@@ -798,13 +826,11 @@ def user_profile_admin_kb(uid: int, prefix: str = "owner", page: int = 0):
     p = prefix
     total_pages = 2
     nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{p}_profile_pg_{uid}_0"))
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{p}_profile_pg_{uid}_{page-1}"))
+    nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{p}_profile_pg_{uid}_{min(page + 1, total_pages - 1)}"))
+    nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{p}_profile_pg_{uid}_{total_pages - 1}"))
     nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{p}_profile_pg_{uid}_{page+1}"))
-        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"{p}_profile_pg_{uid}_{total_pages-1}"))
+    nav.append(InlineKeyboardButton(text="⏮️", callback_data=f"{p}_profile_pg_{uid}_0"))
+    nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{p}_profile_pg_{uid}_{max(page - 1, 0)}"))
 
     if page == 0:
         rows = [
@@ -826,7 +852,6 @@ def user_profile_admin_kb(uid: int, prefix: str = "owner", page: int = 0):
             ],
             [
                 InlineKeyboardButton(text="🎁 Донат", callback_data=f"{p}_donate_{uid}"),
-                InlineKeyboardButton(text="💳 Бан оплаты", callback_data=f"{p}_payban_{uid}"),
             ],
         ]
     else:  # page == 1
@@ -838,10 +863,6 @@ def user_profile_admin_kb(uid: int, prefix: str = "owner", page: int = 0):
             [
                 InlineKeyboardButton(text="📦 +Ёмкость", callback_data=f"{p}_addval_{uid}_cap"),
                 InlineKeyboardButton(text="🎯 +Слот", callback_data=f"{p}_addval_{uid}_slot"),
-            ],
-            [
-                InlineKeyboardButton(text="🔕 Мут", callback_data=f"{p}_mute_{uid}"),
-                InlineKeyboardButton(text="🔔 Размут", callback_data=f"{p}_unmute_{uid}"),
             ],
             [
                 InlineKeyboardButton(text="🏷️ Ранг", callback_data=f"{p}_setrank_{uid}"),
@@ -861,8 +882,8 @@ def user_profile_admin_kb(uid: int, prefix: str = "owner", page: int = 0):
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def donate_submenu_kb(uid: int, prefix: str = "owner", vip_type: str | None = None):
-    """Подменю Донат — VIP/Premium выдача."""
+def donate_submenu_kb(uid: int, prefix: str = "owner", vip_type: str | None = None, pay_banned: bool = False):
+    """Подменю Донат — VIP/Premium выдача + пакеты кликов + оплата."""
     p = prefix
     rows = [
         [
@@ -878,12 +899,16 @@ def donate_submenu_kb(uid: int, prefix: str = "owner", vip_type: str | None = No
             InlineKeyboardButton(text="👑 Prem ∞", callback_data=f"{p}_setvip_{uid}_prem0"),
         ],
     ]
-    if vip_type:
-        rows.append([InlineKeyboardButton(
-            text=f"❌ Снять {vip_type}", callback_data=f"{p}_setvip_{uid}_remove",
-        )])
+    rows.append([
+        InlineKeyboardButton(text="❌ Снять VIP", callback_data=f"{p}_setvip_{uid}_rmvip"),
+        InlineKeyboardButton(text="❌ Снять Prem", callback_data=f"{p}_setvip_{uid}_rmprem"),
+    ])
     rows.append([InlineKeyboardButton(
-        text="💳 Разбан оплаты", callback_data=f"{p}_payunban_{uid}",
+        text="💢 Выдать кликов", callback_data=f"{p}_givedon_{uid}",
+    )])
+    rows.append([InlineKeyboardButton(
+        text="✅ Разбан оплаты" if pay_banned else "💳 Бан оплаты",
+        callback_data=f"{p}_payunban_{uid}" if pay_banned else f"{p}_payban_{uid}",
     )])
     rows.append([InlineKeyboardButton(
         text="⬅️ Профиль", callback_data=f"{p}_user_view_{uid}",
@@ -944,8 +969,9 @@ def admin_panel_kb(page: int = 0):
             ],
             [InlineKeyboardButton(text="📊 Мои действия", callback_data="adm_my_log")],
             [
-                InlineKeyboardButton(text="◀️", callback_data="adm_panel_page:0"),
-                InlineKeyboardButton(text="▶️", callback_data="adm_panel_page:2"),
+                InlineKeyboardButton(text="⏮️◀️", callback_data="adm_panel_page:0"),
+                InlineKeyboardButton(text="📂 2/3", callback_data="noop"),
+                InlineKeyboardButton(text="▶️⏭️", callback_data="adm_panel_page:2"),
             ],
         ])
     else:  # page == 2
@@ -958,10 +984,13 @@ def admin_panel_kb(page: int = 0):
                 InlineKeyboardButton(text="🗑 Удалить НФТ", callback_data="adm_nft_list"),
                 InlineKeyboardButton(text="🎪 Аукцион", callback_data="event_create"),
             ],
+            [InlineKeyboardButton(text="💰 Выдача кликов", callback_data="adm_give")],
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm_settings")],
+            [InlineKeyboardButton(text="🚪 Разжаловаться", callback_data="adm_demote_self")],
             [
-                InlineKeyboardButton(text="◀️ Назад", callback_data="adm_panel_page:1"),
-                InlineKeyboardButton(text="🏠 Меню", callback_data="menu"),
+                InlineKeyboardButton(text="⏮️◀️", callback_data="adm_panel_page:1"),
+                InlineKeyboardButton(text="📂 3/3", callback_data="noop"),
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="adm_panel_page:0"),
             ],
         ])
 
@@ -1054,11 +1083,11 @@ def complaints_list_kb(complaints: list, page: int = 0, total_pages: int = 1):
         )])
     nav = []
     if total_pages > 1:
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"compl_pg:{page - 1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"compl_pg:{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"compl_pg:{total_pages - 1}"))
         nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"compl_pg:{page + 1}"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data="compl_pg:0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"compl_pg:{max(page - 1, 0)}"))
         kb.append(nav)
     kb.append([InlineKeyboardButton(text="⬅️ Панель", callback_data="admin_panel")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -1093,11 +1122,11 @@ def my_complaints_kb(complaints: list, page: int = 0, total_pages: int = 1):
         )])
     nav = []
     if total_pages > 1:
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"my_complaints:{page - 1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"my_complaints:{min(page + 1, total_pages - 1)}"))
+        nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"my_complaints:{total_pages - 1}"))
         nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"my_complaints:{page + 1}"))
+        nav.append(InlineKeyboardButton(text="⏮️", callback_data="my_complaints:0"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"my_complaints:{max(page - 1, 0)}"))
         kb.append(nav)
     kb.append([InlineKeyboardButton(text="⬅️ Поддержка", callback_data="support_menu")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -1134,27 +1163,20 @@ def admin_logs_kb():
     ])
 
 
-# ━━━━━━━━━━━━  АУКЦИОНЫ (user)  ━━━━━━━━━━━━
-def auction_list_kb(events):
-    kb = []
-    for ev in events:
-        eid = ev[0] if isinstance(ev, tuple) else ev["id"]
-        name = ev[1] if isinstance(ev, tuple) else ev["name"]
-        kb.append([InlineKeyboardButton(text=f"🎪 {name}", callback_data=f"auc_view:{eid}")])
-    if not kb:
-        kb.append([InlineKeyboardButton(text="— Нет активных —", callback_data="noop")])
-    kb.append([InlineKeyboardButton(text="⬅️ Мини-игры", callback_data="minigames_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-
-def auction_detail_kb(event_id, user_joined: bool = False):
-    kb = []
-    if user_joined:
-        kb.append([InlineKeyboardButton(text="⬆️ Повысить ставку", callback_data=f"auc_raise:{event_id}")])
-    else:
-        kb.append([InlineKeyboardButton(text="🎯 Участвовать", callback_data=f"auc_join:{event_id}")])
-    kb.append([
-        InlineKeyboardButton(text="🔄 Обновить", callback_data=f"auc_view:{event_id}"),
-        InlineKeyboardButton(text="⬅️ Аукционы", callback_data="auc_list"),
+# ━━━━━━━━━━━━  АУКЦИОНЫ (broadcast)  ━━━━━━━━━━━━
+def auction_broadcast_kb(event_id: int):
+    """Клавиатура рассылки: пользователь ещё НЕ участвует."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Участвовать", callback_data=f"auc_join:{event_id}"),
+            InlineKeyboardButton(text="❌ Игнорировать", callback_data=f"auc_ignore:{event_id}"),
+        ],
     ])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def auction_joined_kb(event_id: int):
+    """Клавиатура для участника: добавить сумму / обновить."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Добавить сумму", callback_data=f"auc_raise:{event_id}")],
+        [InlineKeyboardButton(text="🔄 Обновить", callback_data=f"auc_view:{event_id}")],
+    ])

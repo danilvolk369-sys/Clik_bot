@@ -13,10 +13,12 @@ from config import (
 from database import (
     get_user, update_clicks, update_rank, get_top_players, count_top_players,
     get_user_anonymous, set_user_anonymous, set_user_online,
+    get_user_hide_nft, set_user_hide_nft,
     count_user_nfts, get_user_nft_slots, get_online_count,
     count_users, count_user_complaints_received,
     get_vip_multipliers, is_admin, get_user_top_nfts,
     add_like, has_liked, get_user_likes_count,
+    remove_like,
 )
 from keyboards import click_zone_kb, referral_kb, rating_kb
 from banners_util import send_msg, safe_edit
@@ -58,25 +60,33 @@ async def show_click_zone(call: CallbackQuery):
         if exp == "permanent":
             exp_str = "навсегда"
         elif exp:
-            exp_str = f"до {exp[:10]}"
+            try:
+                from datetime import datetime as _dtfmt
+                d = _dtfmt.fromisoformat(exp[:10])
+                exp_str = f"до {d.strftime('%d.%m.%Y')}"
+            except (ValueError, TypeError):
+                exp_str = f"до {exp[:10]}"
         else:
             exp_str = ""
         emoji = "💎" if vip.lower() == "premium" else "⭐"
         bonuses = []
         if mc > 1:
-            bonuses.append(f"×{mc:.0f} клик")
-        if mi > 1:
-            bonuses.append(f"×{mi:.0f} доход")
+            bonuses.append(f"×{mc:g} клик")
+        if mi != 1:
+            bonuses.append(f"×{mi:g} доход")
         bonus_str = ", ".join(bonuses) if bonuses else ""
         vip_line = f"{emoji} {vip.upper()} ({bonus_str}) — {exp_str}\n"
+
+    # Множитель клика
+    click_mult = f" ({mc:.0f}x)" if mc > 1 else ""
 
     text = (
         f"<b>🔘 Зона майнинга</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💰 Баланс: <b>{fnum(user['clicks'])}</b> 💢\n"
-        f"⚡ Клик: <b>+{fnum(display_power)}</b> Тохн\n"
+        f"⚡ Клик: <b>+{fnum(display_power)}</b> Тохн{click_mult}\n"
         f"{vip_line}"
-        f"🏆 {rank_name}  ·  📈 {fnum(income_rate)}/ч\n\n"
+        f"🏆 Ранг: {rank_name}  ·  📈 {fnum(income_rate)}/ч\n\n"
         f"▸ {bar}\n"
         f"  {fnum(total_clicks)} / {fnum(nxt_thresh)}\n"
         f"━━━━━━━━━━━━━━━━━━"
@@ -92,14 +102,14 @@ async def process_tap(call: CallbackQuery):
     if not user:
         return
 
-    power = BASE_CLICK_POWER + user["bonus_click"]
 
+    power = BASE_CLICK_POWER + user["bonus_click"]
     # VIP-множитель клика
     mc, _ = await get_vip_multipliers(uid)
     power *= mc
-
+    # Крит — максимум x2
     is_crit = random.random() < 0.05
-    earn = power * (5 if is_crit else 1)
+    earn = power * (2 if is_crit else 1)
 
     await update_clicks(uid, earn)
     await update_rank(uid)
@@ -118,13 +128,14 @@ async def process_tap(call: CallbackQuery):
     bar, pct = _progress_bar(total_clicks - cur_thresh, nxt_thresh - cur_thresh)
 
     crit = "🔥 КРИТ! " if is_crit else ""
+    click_mult = f" ({mc:.0f}x)" if mc > 1 else ""
 
     text = (
         f"<b>🔘 Зона майнинга</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💰 Баланс: <b>{fnum(new_balance)}</b> 💢\n"
-        f"⚡ Клик: <b>+{fnum(power)}</b> Тохн\n"
-        f"🏆 {rank_name}  ·  📈 {fnum(income_rate)}/ч\n\n"
+        f"⚡ Клик: <b>+{fnum(power)}</b> Тохн{click_mult}\n"
+        f"🏆 Ранг: {rank_name}  ·  📈 {fnum(income_rate)}/ч\n\n"
         f"▸ {bar}\n"
         f"  {fnum(total_clicks)} / {fnum(nxt_thresh)}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
@@ -151,20 +162,25 @@ async def show_referral(call: CallbackQuery):
 
     ref_link = f"https://t.me/{REFERRAL_BOT_USERNAME}?start={uid}"
     ref_count = user["referrals"]
+    click_power = BASE_CLICK_POWER + user["bonus_click"]
 
     # Подсчёт заработанных кликов от рефералов
     if ref_count >= 1:
         earned = REF_FIRST_CLICKS + REF_FIRST_POWER
         if ref_count > 1:
             earned += (ref_count - 1) * (REF_EACH_CLICKS + REF_EACH_POWER)
+        ref_power = REF_FIRST_POWER + max(0, ref_count - 1) * REF_EACH_POWER
     else:
         earned = 0
+        ref_power = 0
 
     text = (
         f"<b>🔗 Реферальная программа</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
         f"👥 Приглашено: <b>{ref_count}</b>\n"
-        f"💰 Заработано: <b>{fnum(earned)}</b> Тохн\n\n"
+        f"💰 Заработано: <b>{fnum(earned)}</b> Тохн\n"
+        f"⚡ Клик-сила от рефов: <b>+{fnum(ref_power)}</b>\n"
+        f"⚡ Общий клик: <b>+{fnum(click_power)}</b> Тохн\n\n"
         f"🎁 <b>НАГРАДЫ:</b>\n"
         f"▸ Первый реферал:\n"
         f"  💢 +{REF_FIRST_CLICKS}  ·  ⚡ +{REF_FIRST_POWER}\n\n"
@@ -210,8 +226,10 @@ async def rating_page(call: CallbackQuery):
 
 async def _show_rating_page(call: CallbackQuery, page: int):
     uid = call.from_user.id
+    viewer_is_staff = (uid == OWNER_ID) or await is_admin(uid)
     total_players = await count_top_players()
-    total_pages = 5  # всегда 5 страниц по 3 места = 15 мест
+    import math
+    total_pages = max(1, math.ceil(min(RATING_TOP_COUNT, max(total_players, 1)) / RATING_PER_PAGE))  # динамически по RATING_TOP_COUNT
     if page < 0:
         page = 0
     if page >= total_pages:
@@ -237,10 +255,17 @@ async def _show_rating_page(call: CallbackQuery, page: int):
                 name = "Аноним"
             else:
                 name = f"@{uname}" if uname else "Аноним"
+            # ID видно только админам/владельцу
+            if viewer_is_staff:
+                id_str = f" (ID: {p_uid})"
+            elif anon:
+                id_str = ""
+            else:
+                id_str = ""
             power = BASE_CLICK_POWER + (bonus or 0)
             p_likes = await get_user_likes_count(p_uid)
             text += (
-                f"{medal} {name}\n"
+                f"{medal} {name}{id_str}\n"
                 f"   💢 {fnum(clicks)}  ⚡ +{fnum(power)}  ❤️ {p_likes}\n\n"
             )
             kb_players.append(InlineKeyboardButton(
@@ -249,26 +274,32 @@ async def _show_rating_page(call: CallbackQuery, page: int):
             ))
 
     status = "🟢 Вкл" if is_anon else "🔴 Выкл"
-    text += f"━━━━━━━━━━━━━━━━━━━\n🕶 Анонимность: {status}"
+    hide_nft = await get_user_hide_nft(uid)
+    nft_status = "🟢 Скрыто" if hide_nft else "🔴 Видно"
+    text += (
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🕶 Анонимность: {status}\n"
+        f"🎨 НФТ в рейтинге: {nft_status}"
+    )
 
     anon_label = "🕶 Выкл анонимность" if is_anon else "🕶 Вкл анонимность"
+    nft_hide_label = "🎨 Показать НФТ" if hide_nft else "🎨 Скрыть НФТ"
 
     kb = []
     for btn in kb_players:
         kb.append([btn])
-    kb.append([InlineKeyboardButton(text=anon_label, callback_data="toggle_anon")])
+    kb.append([
+        InlineKeyboardButton(text=anon_label, callback_data="toggle_anon"),
+        InlineKeyboardButton(text=nft_hide_label, callback_data="toggle_hide_nft"),
+    ])
 
-    # Пагинация: ◀️  📂 1/5  ▶️
+    # Пагинация: ▶️⏭️ 📂 1/5 ⏮️◀️
     nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"top_range:{page - 1}"))
-    else:
-        nav_row.append(InlineKeyboardButton(text="◀️", callback_data="top_range:0"))
+    nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"top_range:{min(page + 1, total_pages - 1)}"))
+    nav_row.append(InlineKeyboardButton(text="⏭️", callback_data=f"top_range:{total_pages - 1}"))
     nav_row.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"top_range:{page + 1}"))
-    else:
-        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"top_range:{total_pages - 1}"))
+    nav_row.append(InlineKeyboardButton(text="⏮️", callback_data="top_range:0"))
+    nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"top_range:{max(page - 1, 0)}"))
     kb.append(nav_row)
 
     kb.append([InlineKeyboardButton(text="⬅️ Рейтинг", callback_data="rating_menu")])
@@ -299,7 +330,7 @@ async def view_player_profile(call: CallbackQuery):
     else:
         name = f"@{user['username']}" if user['username'] else "Аноним"
 
-    # ID видно только админам/владельцу
+    # ID видно только админам/владельцу; для анонимных ID скрыт
     if viewer_is_staff:
         id_line = f"📌 {name} (ID: {target_uid})\n"
     elif is_anon:
@@ -309,19 +340,47 @@ async def view_player_profile(call: CallbackQuery):
 
     rank_name = RANKS_LIST.get(user["rank"] or 1, "🍼 Новичок")
     power = BASE_CLICK_POWER + user["bonus_click"]
+    mc, mi = await get_vip_multipliers(target_uid)
+    display_power = power * mc
     nft_count = await count_user_nfts(target_uid)
     max_slots = await get_user_nft_slots(target_uid)
     complaints = await count_user_complaints_received(target_uid)
     likes = await get_user_likes_count(target_uid)
     already_liked = await has_liked(viewer_uid, target_uid)
 
+    # VIP/Premium строка
+    vip = user["vip_type"]
+    vip_line = ""
+    if vip:
+        exp = user["vip_expires"]
+        emoji = "💎" if vip.lower() == "premium" else "⭐"
+        bonuses = []
+        if mc > 1:
+            bonuses.append(f"×{mc:g} клик")
+        if mi != 1:
+            bonuses.append(f"×{mi:g} доход")
+        bonus_str = ", ".join(bonuses) if bonuses else ""
+        if exp == "permanent":
+            exp_str = "навсегда"
+        elif exp:
+            try:
+                from datetime import datetime as _dtfmt
+                d = _dtfmt.fromisoformat(exp[:10])
+                exp_str = f"до {d.strftime('%d.%m.%Y')}"
+            except (ValueError, TypeError):
+                exp_str = f"до {exp[:10]}"
+        else:
+            exp_str = ""
+        vip_line = f"{emoji} {vip.upper()} ({bonus_str}) — {exp_str}\n"
+
     text = (
         f"<b>👤 Профиль игрока</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
         f"{id_line}"
-        f"🪪 {rank_name}\n\n"
+        f"🪪 Ранг: {rank_name}\n"
+        f"{vip_line}\n"
         f"💢 Баланс: <b>{fnum(user['clicks'])}</b>\n"
-        f"⚡ Клик: +{fnum(power)}\n"
+        f"⚡ Клик: +{fnum(display_power)}\n"
         f"📈 Доход: {fnum(user['passive_income'] or 0)}/ч\n"
         f"🎨 НФТ: {nft_count}/{max_slots}\n"
         f"🔗 Рефералов: {user['referrals']}\n"
@@ -331,19 +390,19 @@ async def view_player_profile(call: CallbackQuery):
     )
 
     kb_rows = []
-    # Лайк (нельзя лайкнуть себя, нельзя повторно)
+    # Лайк / Анлайк (нельзя себя)
     if viewer_uid != target_uid:
-        if not already_liked:
+        if already_liked:
+            kb_rows.append([InlineKeyboardButton(
+                text="💔 Убрать лайк",
+                callback_data=f"rate_unlike_{target_uid}",
+            )])
+        else:
             kb_rows.append([InlineKeyboardButton(
                 text="❤️ Поставить лайк",
                 callback_data=f"rate_like_{target_uid}",
             )])
-        else:
-            kb_rows.append([InlineKeyboardButton(
-                text="❤️ Вы уже лайкнули",
-                callback_data="noop",
-            )])
-    # НФТ — всегда показываем кнопку
+    # НФТ
     kb_rows.append([InlineKeyboardButton(
         text=f"🎨 Посмотреть НФТ ({nft_count})",
         callback_data=f"rating_nfts_{target_uid}",
@@ -369,13 +428,36 @@ async def rate_like(call: CallbackQuery):
     await view_player_profile(call)
 
 
+@router.callback_query(F.data.startswith("rate_unlike_"))
+async def rate_unlike(call: CallbackQuery):
+    target_uid = int(call.data.replace("rate_unlike_", ""))
+    viewer_uid = call.from_user.id
+    if viewer_uid == target_uid:
+        return await call.answer("❌", show_alert=True)
+    ok = await remove_like(viewer_uid, target_uid)
+    if ok:
+        await call.answer("💔 Лайк убран!", show_alert=True)
+    else:
+        await call.answer("❌ Лайк не стоял", show_alert=True)
+    call.data = f"view_profile_{target_uid}"
+    await view_player_profile(call)
+
+
 @router.callback_query(F.data.startswith("rating_nfts_"))
 async def view_rating_nfts(call: CallbackQuery):
     """Показать топ-5 НФТ игрока из рейтинга."""
     target_uid = int(call.data.replace("rating_nfts_", ""))
+    viewer_uid = call.from_user.id
     user = await get_user(target_uid)
     if not user:
         return await call.answer("❌ Игрок не найден", show_alert=True)
+
+    viewer_is_staff = (viewer_uid == OWNER_ID) or await is_admin(viewer_uid)
+    hide_nft = await get_user_hide_nft(target_uid)
+
+    # Если НФТ скрыты и просматривающий не стафф — не показываем
+    if hide_nft and not viewer_is_staff:
+        return await call.answer("🎨 Игрок скрыл свои НФТ", show_alert=True)
 
     is_anon = await get_user_anonymous(target_uid)
     name = "🕶 Аноним" if is_anon else (f"@{user['username']}" if user['username'] else "Аноним")
@@ -407,4 +489,15 @@ async def toggle_anon(call: CallbackQuery):
     status = "включена 🟢" if new_val else "выключена 🔴"
     await call.answer(f"🕶 Анонимность {status}", show_alert=True)
     # Обновляем
+    await show_top15(call)
+
+
+@router.callback_query(F.data == "toggle_hide_nft")
+async def toggle_hide_nft(call: CallbackQuery):
+    uid = call.from_user.id
+    current = await get_user_hide_nft(uid)
+    new_val = not current
+    await set_user_hide_nft(uid, new_val)
+    status = "скрыты 🟢" if new_val else "видны 🔴"
+    await call.answer(f"🎨 НФТ в рейтинге: {status}", show_alert=True)
     await show_top15(call)

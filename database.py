@@ -20,6 +20,8 @@ async def get_db() -> aiosqlite.Connection:
         await _db_pool.execute("PRAGMA cache_size = 10000")
         await _db_pool.execute("PRAGMA temp_store = MEMORY")
         await _db_pool.execute("PRAGMA mmap_size = 268435456")
+        await _db_pool.execute("PRAGMA busy_timeout = 5000")
+        await _db_pool.execute("PRAGMA wal_autocheckpoint = 1000")
     return _db_pool
 
 
@@ -373,6 +375,8 @@ async def init_db():
         ("users", "payment_banned", "INTEGER DEFAULT 0"),
         ("users", "pinned_nft_id", "INTEGER DEFAULT 0"),
         ("users", "likes", "INTEGER DEFAULT 0"),
+        ("users", "hide_nft", "INTEGER DEFAULT 0"),
+        ("events", "nft_collection", "TEXT DEFAULT ''"),
     ]
     for table, col, typedef in migrations:
         try:
@@ -430,6 +434,13 @@ async def count_users() -> int:
     db = await get_db()
     cur = await db.execute("SELECT COUNT(*) FROM users WHERE is_banned = 0")
     return (await cur.fetchone())[0]
+
+
+async def get_all_user_ids() -> list[int]:
+    """Все user_id не-забаненных пользователей."""
+    db = await get_db()
+    cur = await db.execute("SELECT user_id FROM users WHERE is_banned = 0")
+    return [row[0] for row in await cur.fetchall()]
 
 
 async def count_users_all() -> int:
@@ -551,7 +562,9 @@ async def claim_passive_income(user_id: int) -> tuple[float, float]:
         last_dt = datetime.now()
 
     diff = (datetime.now() - last_dt).total_seconds()
-    hours = diff / 3600.0
+    # Максимум 10 минут накопления
+    capped_seconds = min(diff, 600)  # 600 сек = 10 мин
+    hours = capped_seconds / 3600.0
     earned = min(income_rate * hours, capacity)
 
     # Применяем VIP-множитель дохода (inline, чтобы не зацикливаться)
@@ -707,6 +720,23 @@ async def set_user_anonymous(user_id: int, val: bool):
     _invalidate(user_id)
 
 
+async def get_user_hide_nft(user_id: int) -> bool:
+    u = await get_user(user_id)
+    if not u:
+        return False
+    try:
+        return bool(u["hide_nft"])
+    except (KeyError, TypeError):
+        return False
+
+
+async def set_user_hide_nft(user_id: int, val: bool):
+    db = await get_db()
+    await db.execute("UPDATE users SET hide_nft = ? WHERE user_id = ?", (1 if val else 0, user_id))
+    await db.commit()
+    _invalidate(user_id)
+
+
 # ━━━━━━━━━━━━━━━━━━━ Лайки ━━━━━━━━━━━━━━━━━━━
 async def has_liked(from_uid: int, to_uid: int) -> bool:
     db = await get_db()
@@ -732,6 +762,27 @@ async def add_like(from_uid: int, to_uid: int) -> bool:
         )
         await db.execute(
             "UPDATE users SET likes = COALESCE(likes, 0) + 1 WHERE user_id = ?",
+            (to_uid,),
+        )
+        await db.commit()
+        _invalidate(to_uid)
+        return True
+    except Exception:
+        return False
+
+
+async def remove_like(from_uid: int, to_uid: int) -> bool:
+    """Убирает лайк. Возвращает True если убрали, False если не было."""
+    if not await has_liked(from_uid, to_uid):
+        return False
+    db = await get_db()
+    try:
+        await db.execute(
+            "DELETE FROM user_likes WHERE from_uid = ? AND to_uid = ?",
+            (from_uid, to_uid),
+        )
+        await db.execute(
+            "UPDATE users SET likes = MAX(COALESCE(likes, 0) - 1, 0) WHERE user_id = ?",
             (to_uid,),
         )
         await db.commit()
@@ -1162,7 +1213,9 @@ async def reset_all_users():
         "SELECT DISTINCT user_id FROM payment_orders WHERE package_type = 'clicks' AND status = 'approved'"
     )
     paid_users = {row[0] for row in await cur.fetchall()}
-    # Сбрасываем прогресс, НО сохраняем: VIP, рефералов
+    # Сбрасываем прогресс, НО сохраняем: VIP, Premium, рефералы, реф. программу, купленные клики
+    # Сохраняем VIP-поля: vip_type, vip_multiplier_click, vip_multiplier_income, vip_expires
+    # Сохраняем рефералы: referrals, referrer_id
     await db.execute(
         """UPDATE users SET total_clicks = 0, bonus_click = 0,
            passive_income = 0, income_capacity = 150, rank = 1,
@@ -1773,17 +1826,17 @@ async def get_incoming_trades(user_id: int):
 
 
 # ━━━━━━━━━━━━━━━━━━━ Ивенты ━━━━━━━━━━━━━━━━━━━
-async def create_event(name, nft_name, nft_rarity, nft_income, bet, duration, max_part, created_by):
+async def create_event(name, nft_name, nft_rarity, nft_income, bet, duration, max_part, created_by, nft_collection=""):
     from datetime import datetime, timedelta
     db = await get_db()
     now = datetime.now()
     ends = now + timedelta(minutes=duration)
     await db.execute(
         """INSERT INTO events (name, nft_prize_name, nft_rarity, nft_income, bet_amount,
-           duration_min, max_participants, status, created_by, created_at, ends_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)""",
+           duration_min, max_participants, status, created_by, created_at, ends_at, nft_collection)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)""",
         (name, nft_name, nft_rarity, nft_income, bet, duration, max_part,
-         created_by, now.isoformat(), ends.isoformat()),
+         created_by, now.isoformat(), ends.isoformat(), nft_collection),
     )
     await db.commit()
     cur = await db.execute("SELECT last_insert_rowid()")

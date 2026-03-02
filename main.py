@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import os
+import random
 import shutil
 from datetime import datetime as _dtm
 
@@ -18,6 +19,7 @@ from database import (
     get_event_participants, create_nft_template, grant_nft_to_user,
     get_event, get_active_events, cancel_event, count_event_participants,
     save_auction_message, get_auction_messages, delete_auction_messages,
+    get_all_user_ids,
 )
 from handlers import all_routers
 
@@ -70,31 +72,40 @@ async def _build_auction_text(ev, include_timer=True) -> str:
     emoji = NFT_RARITY_EMOJI.get(rn, "🎨")
     timer = _time_left_str(ev["ends_at"]) if include_timer and ev["ends_at"] else ""
 
-    medals = ["🥇", "🥈", "🥉"]
+    _medals = ["🥇", "🥈", "🥉"]
     top_lines = []
-    for i, p in enumerate(parts[:5], 1):
+    for i, p in enumerate(parts[:10], 1):
+        p_uid = p[0] if isinstance(p, tuple) else p["user_id"]
         p_bid = p[1] if isinstance(p, tuple) else p["bid_amount"]
-        p_name = p[2] if isinstance(p, tuple) else p.get("username", "?")
-        medal = medals[i - 1] if i <= 3 else f"{i}."
-        top_lines.append(f"  {medal} @{p_name or '???'} — {_fmt_num(p_bid)} 💢")
+        p_name = p[2] if isinstance(p, tuple) else (p["username"] if p["username"] else "?")
+        medal = _medals[i - 1] if i <= 3 else f"{i}."
+        top_lines.append(f"  {medal} @{p_name or '???'} (<code>{p_uid}</code>) — {_fmt_num(p_bid)} 💢")
     top_text = "\n".join(top_lines) if top_lines else "  Пока нет участников"
 
     warning = ""
     if p_count < 2:
-        warning = "\n⚠️ Нужно мин. 2 участника (иначе — отмена и возврат)\n"
+        warning = "\n⚠️ <i>Нужно мин. 2 участника (иначе — отмена и возврат)</i>\n"
+
+    try:
+        col = ev['nft_collection'] or ''
+    except (KeyError, IndexError):
+        col = ''
+    col_line = f"  📂 Коллекция: <b>{col}</b>\n" if col else ""
 
     return (
-        f"<b>🎪 {ev['name']}</b>\n"
-        "━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🎨 Приз: <b>{ev['nft_prize_name']}</b>\n"
-        f"{emoji} Редкость: {rn}\n"
-        f"💰 Доход: {_fmt_num(ev['nft_income'])}/ч\n"
-        f"💵 Мин. ставка: {_fmt_num(ev['bet_amount'])} 💢\n"
-        f"👥 Участники: {p_count}/{ev['max_participants']}\n"
-        f"{timer}"
-        f"\n\n🏆 <b>ТОП СТАВОК:</b>\n{top_text}\n"
+        f"🎪 <b>НОВЫЙ АУКЦИОН!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"  📛 Название: <b>{ev['nft_prize_name']}</b>\n"
+        f"{col_line}"
+        f"  ✨ Редкость: {emoji} <b>{rn}</b>\n"
+        f"  💰 Доход: <b>{_fmt_num(ev['nft_income'])}</b>/ч\n\n"
+        f"💵 Мин. ставка: <b>{_fmt_num(ev['bet_amount'])}</b> 💢\n"
+        f"⏳ Длительность: {timer}\n"
+        f"👥 Участников: <b>{p_count}/{ev['max_participants']}</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 <b>Соревнование:</b>\n{top_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━"
         f"{warning}"
-        "\n━━━━━━━━━━━━━━━━━━━"
     )
 
 
@@ -111,11 +122,24 @@ async def _send_timer_alert(bot: Bot, ev, label: str):
                 f"Успейте повысить ставку!",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🎪 К аукциону", callback_data=f"auc_view:{eid}")],
+                    [InlineKeyboardButton(text="💰 Добавить сумму", callback_data=f"auc_raise:{eid}")],
                 ]),
             )
         except Exception:
             pass
+
+
+async def _delete_broadcast_messages(bot: Bot, eid: int):
+    """Удалить все broadcast-сообщения аукциона."""
+    msgs = await get_auction_messages(eid)
+    for row in msgs:
+        chat_id = row[0] if isinstance(row, tuple) else row["chat_id"]
+        msg_id = row[1] if isinstance(row, tuple) else row["message_id"]
+        try:
+            await bot.delete_message(chat_id, msg_id)
+        except Exception:
+            pass
+    await delete_auction_messages(eid)
 
 
 async def auction_checker(bot: Bot):
@@ -129,7 +153,7 @@ async def auction_checker(bot: Bot):
                 eid = ev["id"] if not isinstance(ev, tuple) else ev[0]
                 if isinstance(ev, tuple):
                     continue  # нужен Row
-                ends_at = ev.get("ends_at")
+                ends_at = ev["ends_at"]
                 if not ends_at:
                     continue
                 try:
@@ -168,12 +192,14 @@ async def auction_checker(bot: Bot):
                 participants = await get_event_participants(eid)
                 p_count = len(participants)
 
+                # Удаляем все broadcast-сообщения аукциона
+                await _delete_broadcast_messages(bot, eid)
+
                 # ═══ Правило: меньше 2 участников → отмена и возврат ═══
                 if p_count < 2:
                     await cancel_event(eid)
                     logger.info("Аукцион #%d: <2 участников — отменён, ставки возвращены", eid)
 
-                    # Уведомить единственного участника (если есть)
                     for p in participants:
                         p_uid = p[0] if isinstance(p, tuple) else p["user_id"]
                         p_bid = p[1] if isinstance(p, tuple) else p["bid_amount"]
@@ -185,7 +211,6 @@ async def auction_checker(bot: Bot):
                                 f"💰 Ваша ставка <b>{_fmt_num(p_bid)} 💢</b> возвращена!",
                                 parse_mode="HTML",
                                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                                    [InlineKeyboardButton(text="🎪 Аукционы", callback_data="auc_list")],
                                     [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
                                 ]),
                             )
@@ -215,15 +240,18 @@ async def auction_checker(bot: Bot):
                 winner_uid = winner[0] if isinstance(winner, tuple) else winner["user_id"]
                 winner_bid = winner[1] if isinstance(winner, tuple) else winner["bid_amount"]
 
-                # Создать НФТ-приз и выдать победителю
+                # Создать НФТ-приз с рандомным # и выдать победителю
                 rarity_name = ev["nft_rarity"] if isinstance(ev["nft_rarity"], str) else "Обычный"
                 rarity_pct = NFT_RARITIES.get(rarity_name, 10.0)
                 income = float(ev["nft_income"])
-                nft_name = ev["nft_prize_name"] or "Аукцион-приз"
+                base_name = ev["nft_prize_name"] or "Аукцион-приз"
+                rand_num = random.randint(1000, 9999)
+                nft_name = f"{base_name} #{rand_num}"
 
                 template_id = await create_nft_template(
                     nft_name, rarity_name, rarity_pct, income,
                     price=0, created_by=OWNER_ID,
+                    collection_num=random.randint(1, 999),
                 )
                 await grant_nft_to_user(winner_uid, template_id, bought_price=0)
 
@@ -231,17 +259,25 @@ async def auction_checker(bot: Bot):
 
                 # Уведомить победителя
                 try:
+                    win_col = ev['nft_collection'] or ''
+                except (KeyError, IndexError):
+                    win_col = ''
+                win_col_line = f"  📂 Коллекция: <b>{win_col}</b>\n" if win_col else ""
+                try:
                     await bot.send_message(
                         winner_uid,
                         f"🏆 <b>ПОБЕДА В АУКЦИОНЕ!</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━\n"
+                        f"  🎪 {ev['name']}\n"
+                        f"━━━━━━━━━━━━━━━━━━━\n"
+                        f"  📛 Вы получили: <b>{nft_name}</b>\n"
+                        f"{win_col_line}"
+                        f"  ✨ Редкость: {emoji} <b>{rarity_name}</b>\n"
+                        f"  💰 Доход: <b>{_fmt_num(income)}</b> Тохн/ч\n"
+                        f"  💵 Ваша ставка: <b>{_fmt_num(winner_bid)}</b> 💢\n"
+                        f"  👥 Участников: <b>{p_count}</b>\n"
                         f"━━━━━━━━━━━━━━━━━━━\n\n"
-                        f"🎪 {ev['name']}\n"
-                        f"🎨 Вы получили: <b>{nft_name}</b>\n"
-                        f"{emoji} {rarity_name}\n"
-                        f"💰 Доход: {_fmt_num(income)} Тохн/ч\n"
-                        f"💵 Ваша ставка: {_fmt_num(winner_bid)} 💢\n"
-                        f"👥 Участников: {p_count}\n\n"
-                        f"НФТ добавлен в вашу коллекцию! 🎉",
+                        f"🎉 НФТ добавлен в вашу коллекцию!",
                         parse_mode="HTML",
                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                             [InlineKeyboardButton(text="📦 Мои НФТ", callback_data="my_nft")],
@@ -266,7 +302,6 @@ async def auction_checker(bot: Bot):
                             f"🏆 Победитель поставил {_fmt_num(winner_bid)} 💢",
                             parse_mode="HTML",
                             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                                [InlineKeyboardButton(text="🎪 Аукционы", callback_data="auc_list")],
                                 [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu")],
                             ]),
                         )
@@ -279,13 +314,14 @@ async def auction_checker(bot: Bot):
                         OWNER_ID,
                         f"🎪 Аукцион #{eid} «{ev['name']}» завершён!\n"
                         f"🏆 Победитель: {winner_uid} — {_fmt_num(winner_bid)} 💢\n"
-                        f"👥 Участников: {p_count}",
+                        f"👥 Участников: {p_count}\n"
+                        f"🎨 НФТ: {nft_name}",
                     )
                 except Exception:
                     pass
 
-                logger.info("Аукцион #%d: победитель %d (%.0f 💢), участников %d",
-                            eid, winner_uid, winner_bid, p_count)
+                logger.info("Аукцион #%d: победитель %d (%.0f 💢), участников %d, NFT: %s",
+                            eid, winner_uid, winner_bid, p_count, nft_name)
 
                 _timer_alerts_sent.pop(eid, None)
 
@@ -339,7 +375,10 @@ async def main():
     logger.info("  + auction_checker запущен")
 
     logger.info("КликТохн v%s — polling запущен ✓", VERSION)
-    await dp.start_polling(bot)
+    await dp.start_polling(
+        bot,
+        allowed_updates=["message", "callback_query", "chat_member"],
+    )
 
 
 if __name__ == "__main__":

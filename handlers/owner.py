@@ -6,6 +6,9 @@ import math
 import random
 import json
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -46,9 +49,9 @@ from database import (
     finish_event, cancel_event, finish_event_with_winner,
     get_expired_active_events,
     save_auction_message, get_auction_messages, delete_auction_messages,
-    ban_payment, unban_payment,
+    ban_payment, unban_payment, is_payment_banned,
     update_bonus_click, update_passive_income, update_income_capacity,
-    add_nft_slot,
+    add_nft_slot, get_all_user_ids,
 )
 from keyboards import (
     owner_panel_kb, owner_back_panel_kb, owner_admins_kb,
@@ -56,11 +59,16 @@ from keyboards import (
     banned_list_kb, users_list_kb, user_profile_admin_kb,
     owner_logs_kb, complaints_list_kb, complaint_action_kb,
     owner_orders_kb, order_action_kb, ban_duration_kb,
-    user_nfts_view_kb,
+    user_nfts_view_kb, auction_broadcast_kb,
 )
 from handlers.common import fnum
 
 router = Router()
+
+
+async def _user_profile_kb(uid: int, prefix: str = "owner", page: int = 0):
+    """Клавиатура профиля."""
+    return user_profile_admin_kb(uid, prefix, page)
 
 
 def _is_owner(uid: int) -> bool:
@@ -177,7 +185,15 @@ async def _show_users_page(call, page, prefix):
     total_pages = max(1, math.ceil(total / per_page))
     users = await get_users_page(page, per_page)
     text = f"<b>👥 Участники ({total})</b>\n━━━━━━━━━━━━━━━━━━━\n"
-    await call.message.edit_text(text, reply_markup=users_list_kb(users, page, total_pages, prefix))
+    kb = users_list_kb(users, page, total_pages, prefix)
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.bot.send_message(call.message.chat.id, text, reply_markup=kb)
     await call.answer()
 
 
@@ -207,7 +223,7 @@ async def owner_user_search_id(message: Message, state: FSMContext):
         return await message.answer("❌ Участник не найден", reply_markup=owner_back_panel_kb())
 
     text = await _user_profile_text(user)
-    await message.answer(text, reply_markup=user_profile_admin_kb(uid, "owner"))
+    await message.answer(text, reply_markup=await _user_profile_kb(uid, "owner"))
 
 
 # ── Профиль участника ──
@@ -220,7 +236,15 @@ async def owner_user_view(call: CallbackQuery):
     if not user:
         return await call.answer("❌ Не найден", show_alert=True)
     text = await _user_profile_text(user)
-    await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner"))
+    kb = await _user_profile_kb(uid, "owner")
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.bot.send_message(call.message.chat.id, text, reply_markup=kb)
     await call.answer()
 
 
@@ -234,9 +258,8 @@ async def _user_profile_text(user) -> str:
     from database import count_user_complaints_received, is_payment_banned, get_user_pinned_nft
     complaints = await count_user_complaints_received(uid)
     vip = user["vip_type"]
-    vip_line = ""
     if vip:
-        exp = user.get("vip_expires", None)
+        exp = user["vip_expires"]
         if exp == "permanent":
             exp_str = "навсегда"
         elif exp:
@@ -250,6 +273,8 @@ async def _user_profile_text(user) -> str:
             exp_str = "—"
         emoji = "💎" if vip.lower() == "premium" else "⭐"
         vip_line = f"{emoji} Статус: {vip} — {exp_str}\n"
+    else:
+        vip_line = "🔹 Статус: Обычный\n"
     # Pinned NFT
     pinned = await get_user_pinned_nft(uid)
     pin_line = ""
@@ -386,7 +411,7 @@ async def owner_doban(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 0))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "owner", 0))
 
 
 # Старый хендлер бана (текстовый ввод) — оставляем для совместимости
@@ -412,7 +437,7 @@ async def owner_unban_user_profile(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 0))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "owner", 0))
 
 
 # ── Пагинация профиля ──
@@ -427,7 +452,15 @@ async def owner_profile_page(call: CallbackQuery):
     if not user:
         return await call.answer("❌ Не найден", show_alert=True)
     text = await _user_profile_text(user)
-    await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", page))
+    kb = await _user_profile_kb(uid, "owner", page)
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.bot.send_message(call.message.chat.id, text, reply_markup=kb)
     await call.answer()
 
 
@@ -444,28 +477,36 @@ async def owner_set_vip(call: CallbackQuery):
         await remove_user_vip(uid)
         await log_admin_action(call.from_user.id, "remove_vip", uid)
         await call.answer("✅ VIP/Premium снят", show_alert=True)
+    elif action == "rmvip":
+        await remove_user_vip(uid)
+        await log_admin_action(call.from_user.id, "remove_vip", uid, "VIP")
+        await call.answer("✅ VIP снят", show_alert=True)
+    elif action == "rmprem":
+        await remove_user_vip(uid)
+        await log_admin_action(call.from_user.id, "remove_vip", uid, "Premium")
+        await call.answer("✅ Premium снят", show_alert=True)
     elif action == "vip7":
-        await set_user_vip(uid, "VIP", 2, 1, 7)
+        await set_user_vip(uid, "VIP", 2, 0.5, 7)
         await log_admin_action(call.from_user.id, "set_vip", uid, "VIP 7d")
         await call.answer("✅ VIP на 7 дней выдан", show_alert=True)
     elif action == "vip30":
-        await set_user_vip(uid, "VIP", 2, 1, 30)
+        await set_user_vip(uid, "VIP", 2, 0.5, 30)
         await log_admin_action(call.from_user.id, "set_vip", uid, "VIP 30d")
         await call.answer("✅ VIP на 30 дней выдан", show_alert=True)
     elif action == "vip0":
-        await set_user_vip(uid, "VIP", 2, 1, 0)
+        await set_user_vip(uid, "VIP", 2, 0.5, 0)
         await log_admin_action(call.from_user.id, "set_vip", uid, "VIP permanent")
         await call.answer("✅ VIP навсегда выдан", show_alert=True)
     elif action == "prem7":
-        await set_user_vip(uid, "Premium", 3, 3, 7)
+        await set_user_vip(uid, "Premium", 3, 2, 7)
         await log_admin_action(call.from_user.id, "set_vip", uid, "Premium 7d")
         await call.answer("✅ Premium на 7 дней выдан", show_alert=True)
     elif action == "prem30":
-        await set_user_vip(uid, "Premium", 3, 3, 30)
+        await set_user_vip(uid, "Premium", 3, 2, 30)
         await log_admin_action(call.from_user.id, "set_vip", uid, "Premium 30d")
         await call.answer("✅ Premium на 30 дней выдан", show_alert=True)
     elif action == "prem0":
-        await set_user_vip(uid, "Premium", 3, 3, 0)
+        await set_user_vip(uid, "Premium", 3, 2, 0)
         await log_admin_action(call.from_user.id, "set_vip", uid, "Premium permanent")
         await call.answer("✅ Premium навсегда выдан", show_alert=True)
     else:
@@ -476,9 +517,13 @@ async def owner_set_vip(call: CallbackQuery):
     if user:
         from keyboards import donate_submenu_kb
         vip = user["vip_type"]
+        pb = await is_payment_banned(uid)
         await call.message.edit_text(
-            await _user_profile_text(user),
-            reply_markup=donate_submenu_kb(uid, "owner", vip),
+            f"🎁 <b>Донат — {uid}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Статус: <b>{vip or 'нет'}</b>\n\n"
+            f"Выберите действие:",
+            reply_markup=donate_submenu_kb(uid, "owner", vip, pb),
         )
 
 
@@ -493,8 +538,16 @@ async def owner_payban(call: CallbackQuery):
     await call.answer("🚫 Оплата заблокирована", show_alert=True)
     user = await get_user(uid)
     if user:
-        text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 0))
+        from keyboards import donate_submenu_kb
+        vip = user["vip_type"]
+        pb = await is_payment_banned(uid)
+        await call.message.edit_text(
+            f"🎁 <b>Донат — {uid}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Статус: <b>{vip or 'нет'}</b>\n\n"
+            f"Выберите действие:",
+            reply_markup=donate_submenu_kb(uid, "owner", vip, pb),
+        )
 
 
 @router.callback_query(F.data.startswith("owner_payunban_"))
@@ -507,8 +560,16 @@ async def owner_payunban(call: CallbackQuery):
     await call.answer("✅ Оплата разблокирована", show_alert=True)
     user = await get_user(uid)
     if user:
-        text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 0))
+        from keyboards import donate_submenu_kb
+        vip = user["vip_type"]
+        pb = await is_payment_banned(uid)
+        await call.message.edit_text(
+            f"🎁 <b>Донат — {uid}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Статус: <b>{vip or 'нет'}</b>\n\n"
+            f"Выберите действие:",
+            reply_markup=donate_submenu_kb(uid, "owner", vip, pb),
+        )
 
 
 # ═══════════════════════════════════════════
@@ -523,13 +584,14 @@ async def owner_donate_menu(call: CallbackQuery):
     uid = int(call.data.replace("owner_donate_", ""))
     user = await get_user(uid)
     vip = user["vip_type"] if user else None
+    pb = await is_payment_banned(uid)
     from keyboards import donate_submenu_kb
     await call.message.edit_text(
         f"🎁 <b>Донат — {uid}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
         f"Статус: <b>{vip or 'нет'}</b>\n\n"
         f"Выберите действие:",
-        reply_markup=donate_submenu_kb(uid, "owner", vip),
+        reply_markup=donate_submenu_kb(uid, "owner", vip, pb),
     )
     await call.answer()
 
@@ -556,7 +618,7 @@ async def owner_give_donate(call: CallbackQuery):
         [
             InlineKeyboardButton(text="1.000.000 💢", callback_data=f"owner_don_{uid}_1000000"),
         ],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"owner_profile_pg_{uid}_1")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"owner_donate_{uid}")],
     ])
     await call.message.edit_text(
         f"🎁 Выдать донат пользователю {uid}\n"
@@ -593,8 +655,13 @@ async def owner_donate_exec(call: CallbackQuery):
     await call.answer(f"✅ +{fnum(amount)} 💢 выдано", show_alert=True)
     user = await get_user(uid)
     if user:
-        text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 0))
+        from keyboards import donate_submenu_kb
+        vip = user["vip_type"]
+        pb = await is_payment_banned(uid)
+        await call.message.edit_text(
+            await _user_profile_text(user),
+            reply_markup=donate_submenu_kb(uid, "owner", vip, pb),
+        )
 
 
 # ── Написать участнику (из профиля) ──
@@ -709,7 +776,7 @@ async def owner_addval_menu(call: CallbackQuery):
             row.append(InlineKeyboardButton(
                 text=label, callback_data=f"owner_doval_{uid}_{val_type}_{a}"))
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"owner_profile_pg_{uid}_2")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"owner_profile_pg_{uid}_1")])
 
     await call.message.edit_text(
         f"{name} для {uid}\n━━━━━━━━━━━━━━━━━━━\n\nВыберите значение:",
@@ -753,47 +820,12 @@ async def owner_doval_exec(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 1))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "owner", 1))
 
 
 # ═══════════════════════════════════════════
-#  СТРАНИЦА 4 — Мут, Ранг, Логи, Рефералы
+#  СТРАНИЦА 2 — Ранг, Логи, Рефералы
 # ═══════════════════════════════════════════
-
-# ── Мут / Размут ──
-@router.callback_query(F.data.startswith("owner_mute_"))
-async def owner_mute_user(call: CallbackQuery):
-    if not _is_owner(call.from_user.id):
-        return await call.answer("❌", show_alert=True)
-    uid = int(call.data.replace("owner_mute_", ""))
-    from database import get_db
-    db = await get_db()
-    await db.execute("UPDATE users SET anonymous = 1 WHERE user_id = ?", (uid,))
-    await db.commit()
-    await log_admin_action(call.from_user.id, "mute", uid)
-    await call.answer(f"🔕 {uid} замучен", show_alert=True)
-    user = await get_user(uid)
-    if user:
-        text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 1))
-
-
-@router.callback_query(F.data.startswith("owner_unmute_"))
-async def owner_unmute_user(call: CallbackQuery):
-    if not _is_owner(call.from_user.id):
-        return await call.answer("❌", show_alert=True)
-    uid = int(call.data.replace("owner_unmute_", ""))
-    from database import get_db
-    db = await get_db()
-    await db.execute("UPDATE users SET anonymous = 0 WHERE user_id = ?", (uid,))
-    await db.commit()
-    await log_admin_action(call.from_user.id, "unmute", uid)
-    await call.answer(f"🔔 {uid} размучен", show_alert=True)
-    user = await get_user(uid)
-    if user:
-        text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 1))
-
 
 # ── Сменить ранг ──
 @router.callback_query(F.data.startswith("owner_setrank_"))
@@ -809,7 +841,7 @@ async def owner_set_rank_menu(call: CallbackQuery):
                 text=f"{r}. {RANKS_LIST[r].split(' ', 1)[0]}",
                 callback_data=f"owner_dorank_{uid}_{r}"))
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"owner_profile_pg_{uid}_3")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"owner_profile_pg_{uid}_1")])
     await call.message.edit_text(
         f"🏷️ Сменить ранг для {uid}\n━━━━━━━━━━━━━━━━━━━\n\nВыберите ранг:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
@@ -834,7 +866,7 @@ async def owner_set_rank_exec(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 1))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "owner", 1))
 
 
 # ── Логи действий пользователя ──
@@ -843,16 +875,16 @@ async def owner_activity_log(call: CallbackQuery):
     if not _is_owner(call.from_user.id):
         return await call.answer("❌", show_alert=True)
     uid = int(call.data.replace("owner_actlog_", ""))
-    logs = await get_activity_logs(uid, 0, 15)
+    logs = await get_activity_logs(user_id=uid, page=0, per_page=15)
     lines = [f"📊 Логи действий {uid}\n━━━━━━━━━━━━━━━━━━━\n"]
     if not logs:
         lines.append("Нет записей.")
     else:
         for log in logs:
-            dt = log[3][:16] if log[3] else "?"
-            lines.append(f"• {dt} │ {log[1]} │ {log[2]}")
+            dt = log[4][:16] if log[4] else "?"
+            lines.append(f"• {dt} │ {log[2]} │ {log[3] or ''}")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"owner_profile_pg_{uid}_3")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"owner_profile_pg_{uid}_1")],
     ])
     await call.message.edit_text("\n".join(lines), reply_markup=kb)
     await call.answer()
@@ -875,7 +907,7 @@ async def owner_reset_referrals(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 1))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "owner", 1))
 
 
 # ── Просмотр НФТ юзера (топ-5) ──
@@ -927,7 +959,7 @@ async def owner_set_name(call: CallbackQuery):
     user = await get_user(uid)
     if user:
         text = await _user_profile_text(user)
-        await call.message.edit_text(text, reply_markup=user_profile_admin_kb(uid, "owner", 1))
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "owner", 1))
 @router.callback_query(F.data.startswith("owner_banned:"))
 async def owner_banned_list(call: CallbackQuery):
     if not _is_owner(call.from_user.id):
@@ -959,15 +991,26 @@ async def owner_give(call: CallbackQuery, state: FSMContext):
 async def owner_give_process(message: Message, state: FSMContext):
     if not _is_owner(message.from_user.id):
         return
+    data = await state.get_data()
     await state.clear()
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        return await message.answer("❌ Формат: ID СУММА", reply_markup=owner_back_panel_kb())
-    try:
-        uid = int(parts[0])
-        amount = float(parts[1])
-    except (ValueError, TypeError):
-        return await message.answer("❌ Неверный формат", reply_markup=owner_back_panel_kb())
+    target_uid = data.get("target_uid")
+    if target_uid:
+        # Из профиля — ожидаем только сумму
+        try:
+            amount = float(message.text.strip())
+        except (ValueError, TypeError):
+            return await message.answer("❌ Введите число", reply_markup=owner_back_panel_kb())
+        uid = target_uid
+    else:
+        # Из панели — формат: ID СУММА
+        parts = message.text.strip().split()
+        if len(parts) < 2:
+            return await message.answer("❌ Формат: ID СУММА", reply_markup=owner_back_panel_kb())
+        try:
+            uid = int(parts[0])
+            amount = float(parts[1])
+        except (ValueError, TypeError):
+            return await message.answer("❌ Неверный формат", reply_markup=owner_back_panel_kb())
     user = await get_user(uid)
     if not user:
         return await message.answer("❌ Не найден", reply_markup=owner_back_panel_kb())
@@ -1301,12 +1344,11 @@ async def owner_nft_view(call: CallbackQuery):
         f"<b>📋 НФТ #{t['id']}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
         f"📛 Название: <b>{t['name']}</b>\n"
-        f"📂 Коллекция: #{t['collection_num']}\n"
+        f"📂 Коллекция: <b>#{t['collection_num']}</b>\n"
         f"✨ Редкость: {emoji} {t['rarity_name']} ({t['rarity_pct']}%)\n"
-        f"💰 Доход: <b>{fnum(t['income_per_hour'])}</b>/ч\n"
+        f"💰 Доход: <b>{fnum(t['income_per_hour'])}</b>/ч\n\n\n"
         f"🏷 Цена: {fnum(t['price'])} 💢\n"
-        f"👤 Создатель: {t['created_by']}\n"
-        f"📅 Создан: {(t['created_at'] or '')[:10]}\n\n"
+        f"👤 Создатель: {t['created_by']}\n\n"
         f"━━━━━━━━━━━━━━━━━━━"
     )
     from keyboards import owner_nft_detail_kb
@@ -1755,7 +1797,7 @@ async def owner_reset_user_msg(message: Message, state: FSMContext):
     await message.answer(f"✅ {uid} сброшен!", reply_markup=owner_back_panel_kb())
 
 
-@router.callback_query(F.data.startswith("owner_reset_"))
+@router.callback_query(F.data.regexp(r"^owner_reset_\d+$"))
 async def owner_reset_from_profile(call: CallbackQuery):
     if not _is_owner(call.from_user.id):
         return await call.answer("❌", show_alert=True)
@@ -1763,6 +1805,10 @@ async def owner_reset_from_profile(call: CallbackQuery):
     await reset_user_progress(uid)
     await log_admin_action(call.from_user.id, "reset", uid)
     await call.answer(f"✅ {uid} сброшен!", show_alert=True)
+    user = await get_user(uid)
+    if user:
+        text = await _user_profile_text(user)
+        await call.message.edit_text(text, reply_markup=await _user_profile_kb(uid, "owner", 0))
 
 
 @router.callback_query(F.data == "owner_wipe_all")
@@ -2067,21 +2113,26 @@ async def owner_chat_action(call: CallbackQuery):
 # Схема настроек: ключ → (название, тип, значение по умолчанию, описание)
 _SETTINGS_SCHEMA = {
     "maintenance":         ("🔧 Тех. работы",           "bool",  "false",    "Бот не отвечает участникам"),
-    "payment_closed":      ("🚫 Оплата закрыта",        "bool",  "false",    "Временно закрыть оплату"),
+    "payment_closed":      ("🚫 Оплата закрыта",        "bool",  "false",    "Временно закрыть приём оплат"),
     "welcome_msg":         ("👋 Приветствие",            "text",  "",         "Доп. текст при /start"),
-    "sber_card":           ("💳 Реквизиты",             "text",  "",         "Номер карты / счёта"),
-    "pay_fio":             ("📝 ФИО получателя",       "text",  "",         "ФИО для перевода"),
-    "pay_method":          ("🏦 Способ оплаты",         "text",  "СБП",      "СБП / Сбербанк / Тинькофф"),
     "chat_cost":           ("💬 Стоимость чата",        "int",   "50",       "Клики за поиск чата"),
     "min_auction_bet":     ("🎪 Мин. ставка аукциона",  "int",   "100",      "Минимум для участия"),
     "max_nft_slots":       ("📦 Макс. слотов НФТ",      "int",   "5",        "По умолчанию слотов"),
-    "nft_delete_cost":     ("🗑 Стоимость удаления НФТ","int",   "3500",     "Клики за удаление"),
+    "nft_delete_cost":     ("🗑 Удаление НФТ цена",     "int",   "3500",     "Клики за удаление"),
     "ref_clicks":          ("🎁 Бонус реферала",        "int",   "200",      "Клики за реферала"),
     "shop_open_clicks":    ("🛒 Мин. клики магазин",    "int",   "10",       "Открыть магазин"),
     "minigames_clicks":    ("🎮 Мин. клики мини-игры",  "int",   "150",      "Открыть мини-игры"),
     "auto_approve_pay":    ("✅ Авто-одобрение",        "bool",  "false",    "Авто-одобрять платежи"),
     "notify_new_user":     ("🔔 Новый участник",        "bool",  "true",     "Уведомлять о регистрации"),
 }
+
+# Настройки доната (отдельная секция)
+_DONATE_SCHEMA = {
+    "sber_card":   ("💳 Реквизиты",       "text",  "",     "Номер карты / счёта"),
+    "pay_fio":     ("👤 Фамилия Имя",     "text",  "",     "ФИО получателя перевода"),
+    "pay_method":  ("🏦 Способ оплаты",   "text",  "СБП",  "СБП / Сбербанк / Тинькофф"),
+}
+_DONATE_KEYS = list(_DONATE_SCHEMA.keys())
 
 
 _SETTINGS_KEYS = list(_SETTINGS_SCHEMA.keys())
@@ -2120,17 +2171,20 @@ async def _render_settings_page(call: CallbackQuery, page: int = 0):
             )])
     lines.append("\n━━━━━━━━━━━━━━━━━━━")
 
-    # Навигация
+    # Пагинация: ⏮️ ◀️ 📂 1/N ▶️ ⏭️
     nav = []
-    if page > 0:
+    if total_pages > 1:
         nav.append(InlineKeyboardButton(text="⏮️", callback_data="stg_pg:0"))
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"stg_pg:{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"stg_pg:{page+1}"))
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️", callback_data=f"stg_pg:{page-1}"))
+        nav.append(InlineKeyboardButton(text=f"📂 {page+1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="▶️", callback_data=f"stg_pg:{page+1}"))
         nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"stg_pg:{total_pages-1}"))
-    kb_rows.append(nav)
+        kb_rows.append(nav)
 
+    # Отдельная кнопка для настройки доната
+    kb_rows.append([InlineKeyboardButton(text="💳 Настройка доната", callback_data="donate_settings")])
     kb_rows.append([InlineKeyboardButton(text="🔄 Сбросить все", callback_data="stg_reset_all")])
     kb_rows.append([InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")])
     await call.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
@@ -2237,6 +2291,84 @@ async def stg_reset_all(call: CallbackQuery):
     await log_admin_action(call.from_user.id, "setting", details="Сброс всех настроек")
     await call.answer("✅ Все настройки сброшены!", show_alert=True)
     await owner_settings(call)
+
+
+# ══════════════════════════════════════════
+#  НАСТРОЙКА ДОНАТА
+# ══════════════════════════════════════════
+
+async def _render_donate_page(call: CallbackQuery):
+    """Страница настроек доната (карта, ФИО, способ оплаты)."""
+    lines = ["<b>💳 Настройка доната</b>\n━━━━━━━━━━━━━━━━━━━\n"]
+    kb_rows: list[list[InlineKeyboardButton]] = []
+    for key in _DONATE_KEYS:
+        label, stype, default, desc = _DONATE_SCHEMA[key]
+        val = await get_setting(key, default)
+        display = val if val else "—"
+        lines.append(f"  {label}: <b>{display}</b>")
+        kb_rows.append([InlineKeyboardButton(
+            text=f"✏️ {label}",
+            callback_data=f"don_edit:{key}",
+        )])
+    lines.append("\n━━━━━━━━━━━━━━━━━━━")
+    kb_rows.append([InlineKeyboardButton(text="⬅️ Настройки", callback_data="owner_settings")])
+    await call.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await call.answer()
+
+
+@router.callback_query(F.data == "donate_settings")
+async def donate_settings(call: CallbackQuery):
+    if not _is_owner(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
+    await _render_donate_page(call)
+
+
+@router.callback_query(F.data.startswith("don_edit:"))
+async def donate_edit(call: CallbackQuery, state: FSMContext):
+    if not _is_owner(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
+    key = call.data.split(":")[1]
+    if key not in _DONATE_SCHEMA:
+        return await call.answer("❌", show_alert=True)
+    label, stype, default, desc = _DONATE_SCHEMA[key]
+    current = await get_setting(key, default)
+    await state.set_state(OwnerStates.waiting_donate_value)
+    await state.update_data(don_key=key)
+    await call.message.edit_text(
+        f"✏️ {label}\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📝 {desc}\n"
+        f"Текущее: <b>{current or '—'}</b>\n\n"
+        f"Введите новое значение:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="donate_settings")],
+        ]),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.message(OwnerStates.waiting_donate_value)
+async def owner_donate_value(message: Message, state: FSMContext):
+    if not _is_owner(message.from_user.id):
+        return
+    data = await state.get_data()
+    key = data.get("don_key")
+    await state.clear()
+    if not key or key not in _DONATE_SCHEMA:
+        return await message.answer("❌ Ошибка")
+    label, stype, default, desc = _DONATE_SCHEMA[key]
+    val = message.text.strip()
+    await set_setting(key, val)
+    await log_admin_action(message.from_user.id, "setting", details=f"donate {key} = {val}")
+    await message.answer(
+        f"✅ {label} = <b>{val}</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 К настройкам доната", callback_data="donate_settings")],
+            [InlineKeyboardButton(text="⬅️ Панель", callback_data="owner_panel")],
+        ]),
+    )
 
 
 # ══════════════════════════════════════════
@@ -2348,13 +2480,18 @@ async def owner_rm_admin(call: CallbackQuery):
 
 # ── Права админов (с пагинацией) ──
 _PERM_LABELS = {
+    "stats": "📊 Статистика",
+    "users": "👥 Участники",
     "ban": "🔨 Бан/Разбан",
+    "chat_logs": "💬 Переписки",
     "tickets": "📋 Тикеты",
+    "complaints": "📨 Жалобы",
+    "broadcast": "📢 Рассылка",
+    "logs": "📝 Логи",
     "nft": "🎨 Создание НФТ",
     "give_clicks": "💰 Выдача кликов",
-    "broadcast": "📢 Рассылка",
-    "events": "🎪 Ивенты",
-    "complaints": "📨 Жалобы",
+    "events": "🎪 Ивенты/Аукационы",
+    "settings": "⚙️ Настройки",
 }
 
 
@@ -2478,8 +2615,12 @@ async def perm_demote(call: CallbackQuery):
 @router.callback_query(F.data == "event_create")
 async def event_create_start(call: CallbackQuery, state: FSMContext):
     uid = call.from_user.id
-    if not _is_owner(uid) and not await is_admin(uid):
-        return await call.answer("❌", show_alert=True)
+    if not _is_owner(uid):
+        if not await is_admin(uid):
+            return await call.answer("❌", show_alert=True)
+        perms = await get_admin_permissions(uid)
+        if not perms.get("events", False):
+            return await call.answer("❌ Нет прав", show_alert=True)
     await state.set_state(EventStates.waiting_name)
     back_cb = "owner_panel" if _is_owner(uid) else "admin_panel"
     await call.message.edit_text("🎪 Название аукциона:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -2498,6 +2639,16 @@ async def event_name(message: Message, state: FSMContext):
 @router.message(EventStates.waiting_nft_name)
 async def event_nft_name(message: Message, state: FSMContext):
     await state.update_data(nft_name=message.text.strip())
+    await state.set_state(EventStates.waiting_collection)
+    await message.answer("📦 Коллекция НФТ (или отправьте <b>-</b> чтобы пропустить):", parse_mode="HTML")
+
+
+@router.message(EventStates.waiting_collection)
+async def event_collection(message: Message, state: FSMContext):
+    col = message.text.strip()
+    if col == "-":
+        col = ""
+    await state.update_data(nft_collection=col)
     kb = []
     for rn, pct in NFT_RARITIES.items():
         emoji = NFT_RARITY_EMOJI.get(rn, "🟢")
@@ -2570,16 +2721,21 @@ async def event_max_part(message: Message, state: FSMContext):
     data = await state.get_data()
     rn = data.get("nft_rarity", "Обычный")
     emoji = NFT_RARITY_EMOJI.get(rn, "🟢")
+    col = data.get('nft_collection', '') or ''
+    col_line = f"  � Коллекция: <b>{col}</b>\n" if col else ""
     text = (
-        "🎪 ПРЕДПРОСМОТР АУКЦИОНА\n"
-        "══════════════════════\n\n"
-        f"📛 {data['event_name']}\n"
-        f"🎨 Приз: {data['nft_name']}\n"
-        f"✨ {emoji} {rn} ({data.get('nft_rarity_pct', 10)}%)\n"
-        f"💰 Доход: {fnum(data['nft_income'])} Тохн/ч\n"
-        f"💵 Мин. ставка: {fnum(data['bet'])} 💢\n"
-        f"⏱ Длительность: {data['duration']} мин\n"
-        f"👥 Макс. участников: {mp}\n\n"
+        "🎪 <b>ПРЕДПРОСМОТР АУКЦИОНА</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"  📛 <b>{data['event_name']}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"  📛 Название: <b>{data['nft_name']}</b>\n"
+        f"{col_line}"
+        f"  ✨ Редкость: {emoji} <b>{rn}</b> ({data.get('nft_rarity_pct', 10)}%)\n"
+        f"  💰 Доход: <b>{fnum(data['nft_income'])}</b> Тохн/ч\n\n"
+        f"💵 Мин. ставка: <b>{fnum(data['bet'])}</b> 💢\n"
+        f"⏱ Длительность: <b>{data['duration']}</b> мин\n"
+        f"👥 Макс. участников: <b>{mp}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n\n"
         "Создать?"
     )
     await state.set_state(EventStates.confirm)
@@ -2598,9 +2754,46 @@ async def event_confirm(call: CallbackQuery, state: FSMContext):
         data["event_name"], data["nft_name"], data.get("nft_rarity", "Обычный"),
         data["nft_income"], data["bet"], data["duration"],
         data["max_part"], call.from_user.id,
+        nft_collection=data.get("nft_collection", ""),
     )
     await log_admin_action(call.from_user.id, "create_event", details=f"Ивент #{eid}")
-    await call.answer(f"✅ Аукцион #{eid} создан!", show_alert=True)
+
+    # ── Broadcast аукциона всем пользователям ──
+    rn = data.get("nft_rarity", "Обычный")
+    emoji = NFT_RARITY_EMOJI.get(rn, "🎨")
+    dur = data["duration"]
+    col = data.get('nft_collection', '') or ''
+    col_line2 = f"  � Коллекция: <b>{col}</b>\n" if col else ""
+    broadcast_text = (
+        f"🎪 <b>НОВЫЙ АУКЦИОН!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"  📛 <b>{data['event_name']}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"  📛 Название: <b>{data['nft_name']}</b>\n"
+        f"{col_line2}"
+        f"  ✨ Редкость: {emoji} <b>{rn}</b>\n"
+        f"  💰 Доход: <b>{fnum(data['nft_income'])}</b>/ч\n\n"
+        f"💵 Мин. ставка: <b>{fnum(data['bet'])}</b> 💢\n"
+        f"⏱ Длительность: <b>{dur} мин</b>\n"
+        f"👥 Макс. участников: <b>{data['max_part']}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"  🏆 Победитель получает НФТ!\n"
+        f"  ❌ Проигравшие теряют ставки\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<i>Нажмите «Участвовать» чтобы сделать ставку</i>"
+    )
+    kb = auction_broadcast_kb(eid)
+    all_ids = await get_all_user_ids()
+    sent = 0
+    for uid in all_ids:
+        try:
+            msg = await call.bot.send_message(uid, broadcast_text, parse_mode="HTML", reply_markup=kb)
+            await save_auction_message(eid, uid, msg.message_id)
+            sent += 1
+        except Exception:
+            pass
+
+    await call.answer(f"✅ Аукцион #{eid} создан!\n📢 Отправлено {sent} пользователям", show_alert=True)
     await owner_panel(call, state)
 
 
@@ -2730,7 +2923,7 @@ async def order_approve(call: CallbackQuery):
         reward_text = f"💢 +{fnum(clicks)} Тохн выдано!"
     elif pkg_type == "vip" and pkg_id in VIP_PACKAGES:
         mc, mi, dur, _, label = VIP_PACKAGES[pkg_id]
-        vip_name = "VIP" if mc == 2 and mi == 1 else "Premium"
+        vip_name = "VIP" if mc == 2 else "Premium"  # VIP: 2,0.5 | Premium: 3,2
         await set_user_vip(uid, vip_name, mc, mi, dur)
         dur_text = f"{dur} дней" if dur > 0 else "навсегда"
         reward_text = f"⭐ {vip_name} выдан ({dur_text})"
