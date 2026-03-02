@@ -7,10 +7,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 VERSION = "1.0.1"
-TOKEN = os.getenv("BOT_TOKEN", "8507895212:AAG2zy57jMp0hEXPCUJtEFt7jAdv9XmTakU")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "Clik_TohnBot")
-REFERRAL_BOT_USERNAME = os.getenv("REFERRAL_BOT_USERNAME", "imopesbot")
-OWNER_ID = int(os.getenv("OWNER_ID", "8507895212"))
+TOKEN = os.getenv("BOT_TOKEN")
+BOT_USERNAME = os.getenv("BOT_USERNAME")
+REFERRAL_BOT_USERNAME = os.getenv("REFERRAL_BOT_USERNAME")
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+
+# ━━━━━━━━━━━━━━━━━━━ Railway Deploy ━━━━━━━━━━━━━━━━━━━
+PORT = int(os.getenv("PORT", "8080"))
+RAILWAY_ENVIRONMENT = os.getenv("RAILWAY_ENVIRONMENT", "local")
 
 # Путь к файлу БД: на Railway Volume — /data/clicktohn.db
 DB_NAME = os.getenv("DB_NAME", "clicktohn.db")
@@ -93,11 +97,11 @@ NFT_RARITY_EMOJI = {
     "Космический": "🌌", "Бессмертный": "♾️", "Абсолютный": "⚡",
 }
 
-RATING_TOP_COUNT = 15
+RATING_TOP_COUNT = 20
 
 # ━━━━━━━━━━━━━━━━━━━ Оплата (только Сбербанк) ━━━━━━━━━━━━━━━━━━━
 # Укажите номер карты Сбербанка для приёма оплаты
-SBER_CARD = os.getenv("SBER_CARD", "2202 2081 2341 5326 (Данил Т.)")  # номер карты Сбербанка
+SBER_CARD = os.getenv("SBER_CARD", "")  # номер карты Сбербанка
 
 # ━━━━━━━━━━━━━━━━━━━ Пакеты за рубли ━━━━━━━━━━━━━━━━━━━
 # id: (clicks, price_rub, label)
@@ -112,11 +116,11 @@ CLICK_PACKAGES = {
 # ━━━━━━━━━━━━━━━━━━━ VIP/Премиум пакеты ━━━━━━━━━━━━━━━━━━━
 # id: (multiplier_click, multiplier_income, duration_days, price_rub, label)
 VIP_PACKAGES = {
-    "vip_week":     (2, 1, 7,   299,  "⭐ VIP неделя — 299₽ (×2 клик)"),
-    "vip_month":    (2, 1, 30,  599,  "⭐ VIP месяц — 599₽ (×2 клик)"),
-    "vip_forever":  (2, 1, 0,   1299, "⭐ VIP навсегда — 1 299₽ (×2 клик)"),
-    "prem_week":    (3, 3, 7,   599,  "💎 Premium неделя — 599₽ (×3 клик+доход)"),
-    "prem_month":   (3, 3, 30,  999,  "💎 Premium месяц — 999₽ (×3 клик+доход)"),
-    "prem_forever": (3, 3, 0,   1999, "💎 Premium навсегда — 1 999₽ (×3 клик+доход)"),
+    "vip_week":     (2, 0.5, 7,   299,  "⭐ VIP неделя — 299₽"),
+    "vip_month":    (2, 0.5, 30,  599,  "⭐ VIP месяц — 599₽"),
+    "vip_forever":  (2, 0.5, 0,   1299, "⭐ VIP навсегда — 1 299₽"),
+    "prem_week":    (3, 2, 7,   599,  "💎 Premium неделя — 599₽"),
+    "prem_month":   (3, 2, 30,  999,  "💎 Premium месяц — 999₽"),
+    "prem_forever": (3, 2, 0,   1999, "💎 Premium навсегда — 1 999₽"),
 }
 
