@@ -346,6 +346,32 @@ def _ensure_db():
         logger.info("БД уже существует: %s", DB_NAME)
 
 
+async def _db_backup_loop():
+    """Каждые 5 минут делает WAL checkpoint — сохраняет все данные на диск."""
+    while True:
+        await asyncio.sleep(300)  # 5 минут
+        try:
+            from database import get_db
+            db = await get_db()
+            await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            logger.info("💾 БД checkpoint выполнен — данные сохранены")
+        except Exception as e:
+            logger.error("Ошибка checkpoint БД: %s", e)
+
+
+async def _shutdown_db():
+    """Корректное закрытие БД при остановке — сохраняет все данные."""
+    try:
+        from database import get_db, _db_pool
+        if _db_pool is not None:
+            await _db_pool.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            await _db_pool.commit()
+            await _db_pool.close()
+            logger.info("💾 БД корректно закрыта, все данные сохранены")
+    except Exception as e:
+        logger.error("Ошибка при закрытии БД: %s", e)
+
+
 async def main():
     logger.info("КликТохн v%s — запуск…", VERSION)
 
@@ -374,11 +400,19 @@ async def main():
     asyncio.create_task(auction_checker(bot))
     logger.info("  + auction_checker запущен")
 
+    # Запускаем автосохранение БД каждые 5 минут
+    asyncio.create_task(_db_backup_loop())
+    logger.info("  + db_backup_loop запущен (каждые 5 мин)")
+
     logger.info("КликТохн v%s — polling запущен ✓", VERSION)
-    await dp.start_polling(
-        bot,
-        allowed_updates=["message", "callback_query", "chat_member"],
-    )
+    try:
+        await dp.start_polling(
+            bot,
+            allowed_updates=["message", "callback_query", "chat_member"],
+        )
+    finally:
+        # При любом завершении — сохраняем БД
+        await _shutdown_db()
 
 
 if __name__ == "__main__":

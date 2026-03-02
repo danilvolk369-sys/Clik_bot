@@ -2,6 +2,7 @@
 # РАБОТА С БАЗОЙ ДАННЫХ — КликТохн v1.0.1
 # ======================================================
 import time
+import os
 import aiosqlite
 from config import DB_NAME, RANK_THRESHOLDS
 
@@ -10,18 +11,25 @@ _cache_ts: dict = {}
 _CACHE_TTL = 30
 _db_pool: aiosqlite.Connection | None = None
 
+# На Railway (production) — пишем данные сразу на диск
+_IS_RAILWAY = os.getenv("RAILWAY_ENVIRONMENT") is not None
+
 
 async def get_db() -> aiosqlite.Connection:
     global _db_pool
     if _db_pool is None:
         _db_pool = await aiosqlite.connect(DB_NAME)
         await _db_pool.execute("PRAGMA journal_mode = WAL")
-        await _db_pool.execute("PRAGMA synchronous = NORMAL")
+        # На Railway — FULL sync для надёжности, локально — NORMAL для скорости
+        if _IS_RAILWAY:
+            await _db_pool.execute("PRAGMA synchronous = FULL")
+        else:
+            await _db_pool.execute("PRAGMA synchronous = NORMAL")
         await _db_pool.execute("PRAGMA cache_size = 10000")
         await _db_pool.execute("PRAGMA temp_store = MEMORY")
         await _db_pool.execute("PRAGMA mmap_size = 268435456")
         await _db_pool.execute("PRAGMA busy_timeout = 5000")
-        await _db_pool.execute("PRAGMA wal_autocheckpoint = 1000")
+        await _db_pool.execute("PRAGMA wal_autocheckpoint = 100")
     return _db_pool
 
 
