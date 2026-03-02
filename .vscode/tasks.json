@@ -1,0 +1,25 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Git: commit and push to Railway",
+			"type": "shell",
+			"command": "cd c:\\Users\\danil\\Desktop\\Clik_bot && git add -A && git commit -m \"feat: 5 NFT на странице маркета + кнопки купить + коллекция при создании НФТ\" && git push"
+		},
+		{
+			"label": "Git push to Railway",
+			"type": "shell",
+			"command": "git add -A && git commit -m \"feat: 5 NFT на странице маркета + кнопки купить + коллекция при создании НФТ\" && git push"
+		},
+		{
+			"label": "git-add",
+			"type": "shell",
+			"command": "git add -A"
+		},
+		{
+			"label": "Git Push",
+			"type": "shell",
+			"command": "cd c:\\Users\\danil\\Desktop\\Clik_bot && git add -A && git commit -m \"update: маркет 5 НФТ + коллекция при создании\" --allow-empty && git push"
+		}
+	]
+}

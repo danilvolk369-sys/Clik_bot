@@ -1235,18 +1235,31 @@ async def owner_nft_price(message: Message, state: FSMContext):
         price = float(message.text.strip())
     except (ValueError, TypeError):
         return await message.answer("❌ Число")
+    await state.update_data(nft_price=price)
+    await state.set_state(OwnerStates.nft_collection)
+    await message.answer("📂 Введите номер коллекции (число, например 0):")
+
+
+@router.message(OwnerStates.nft_collection)
+async def owner_nft_collection(message: Message, state: FSMContext):
+    if not _is_owner(message.from_user.id):
+        return
+    try:
+        col = int(message.text.strip())
+    except (ValueError, TypeError):
+        return await message.answer("❌ Введите число")
+    await state.update_data(nft_collection=col)
     data = await state.get_data()
-    data["nft_price"] = price
-    await state.update_data(**data)
     rn = data.get("rarity_name", "Обычный")
     emoji = NFT_RARITY_EMOJI.get(rn, "🟢")
     text = (
         "<b>📋 Предпросмотр НФТ</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
         f"📛 <b>{data['nft_name']}</b>\n"
+        f"📂 Коллекция: <b>#{col}</b>\n"
         f"✨ {emoji} {rn} ({data.get('rarity_pct', 10)}%)\n"
         f"💰 Доход: <b>{fnum(data['nft_income'])}</b> Тохн/ч\n"
-        f"🏷 Цена: <b>{fnum(price)}</b> 💢\n\n"
+        f"🏷 Цена: <b>{fnum(data['nft_price'])}</b> 💢\n\n"
         "Опубликовать?"
     )
     await state.set_state(OwnerStates.nft_confirm)
@@ -1263,6 +1276,7 @@ async def owner_nft_publish(call: CallbackQuery, state: FSMContext):
     tid = await create_nft_template(
         data["nft_name"], data["rarity_name"], data["rarity_pct"],
         data["nft_income"], data["nft_price"], owner_id,
+        collection_num=data.get("nft_collection", 0),
     )
     # Выдать НФТ владельцу и выставить на торговую площадку
     user_nft_id = await grant_nft_to_user(owner_id, tid, bought_price=0)
@@ -1273,6 +1287,7 @@ async def owner_nft_publish(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         f"✅ НФТ создан и выставлен на площадку!\n\n"
         f"{emoji} <b>{data['nft_name']}</b>\n"
+        f"📂 Коллекция: <b>#{data.get('nft_collection', 0)}</b>\n"
         f"✨ {rn} ({data.get('rarity_pct', 10)}%)\n"
         f"💰 Доход: {fnum(data['nft_income'])}/ч\n"
         f"🏷 Цена: {fnum(data['nft_price'])} 💢",

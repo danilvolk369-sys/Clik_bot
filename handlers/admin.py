@@ -1101,16 +1101,27 @@ async def adm_nft_price(message: Message, state: FSMContext):
         price = float(message.text.strip())
     except (ValueError, TypeError):
         return await message.answer("❌ Число")
+    await state.update_data(nft_price=price)
+    await state.set_state(AdminStates.nft_collection)
+    await message.answer("📂 Номер коллекции (число):")
+
+
+@router.message(AdminStates.nft_collection)
+async def adm_nft_collection(message: Message, state: FSMContext):
+    try:
+        col = int(message.text.strip())
+    except (ValueError, TypeError):
+        return await message.answer("❌ Введите число")
+    await state.update_data(nft_collection=col)
     data = await state.get_data()
-    data["nft_price"] = price
-    await state.update_data(**data)
     rn = data.get("rarity_name", "Обычный")
     emoji = NFT_RARITY_EMOJI.get(rn, "🟢")
     text = (
         f"📋 НФТ:\n{data['nft_name']}\n"
+        f"📂 Коллекция: #{col}\n"
         f"{emoji} {rn} ({data.get('rarity_pct', 10)}%)\n"
         f"💰 {fnum(data['nft_income'])} Тохн/ч\n"
-        f"🏷 {fnum(price)} 💢"
+        f"🏷 {fnum(data['nft_price'])} 💢"
     )
     await state.set_state(AdminStates.nft_confirm)
     await message.answer(text, reply_markup=owner_nft_publish_kb())
@@ -1123,6 +1134,7 @@ async def adm_nft_publish(call: CallbackQuery, state: FSMContext):
     tid = await create_nft_template(
         data["nft_name"], data["rarity_name"], data["rarity_pct"],
         data["nft_income"], data["nft_price"], call.from_user.id,
+        collection_num=data.get("nft_collection", 0),
     )
     await log_admin_action(call.from_user.id, "create_nft", details=f"#{tid}")
     await call.answer("✅ НФТ создан!", show_alert=True)

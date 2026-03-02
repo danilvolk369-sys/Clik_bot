@@ -335,7 +335,7 @@ async def market_menu(call: CallbackQuery):
 async def nft_market_page(call: CallbackQuery):
     page = int(call.data.replace("nftp_", ""))
     total = await count_market_listings()
-    per_page = 1
+    per_page = 5
     total_pages = max(1, math.ceil(total / per_page))
     if page < 0:
         page = 0
@@ -351,35 +351,39 @@ async def nft_market_page(call: CallbackQuery):
             pass
         return await call.answer()
 
-    item = items[0]
-    listing_id = item[0]
-    name = item[5]
-    rarity_name = item[6]
-    rarity_pct = item[7]
-    income = item[8]
-    price = item[4]
-    collection_num = item[9]
-    emoji = _rarity_emoji(rarity_name)
+    text = f"<b>🛒 НФТ НА ПРОДАЖЕ</b> ({total} шт.)\n━━━━━━━━━━━━━━━━━━━\n"
 
-    text = (
-        f"<b>🛒 НФТ НА ПРОДАЖЕ</b> ({total} шт.)\n"
-        f"━━━━━━━━━━━━━━━━━━━\n\n\n"
-        f"📛 Название: <b>{name}</b>\n"
-        f"📂 Коллекция: <b>#{collection_num}</b>\n"
-        f"✨ Редкость: {emoji} {rarity_name} ({rarity_pct}%)\n"
-        f"💰 Доход: <b>{fnum(income)}</b>/ч\n\n\n"
-        f"🏷 Цена: <b>{fnum(price)}</b> 💢\n\n"
-        f"━━━━━━━━━━━━━━━━━━━"
-    )
-
-    # Пагинация: ▶️⏭️ 📂 1/N ⏮️◀️
     kb = []
+    for item in items:
+        listing_id = item[0]
+        name = item[5]
+        rarity_name = item[6]
+        rarity_pct = item[7]
+        income = item[8]
+        price = item[4]
+        collection_num = item[9]
+        emoji = _rarity_emoji(rarity_name)
+
+        text += (
+            f"\n📛 Название: <b>{name}</b>\n"
+            f"📂 Коллекция: <b>#{collection_num}</b>\n"
+            f"✨ Редкость: {emoji} {rarity_name} ({rarity_pct}%)\n"
+            f"💰 Доход: <b>{fnum(income)}</b>/ч\n\n"
+            f"🏷 Цена: <b>{fnum(price)}</b> 💢\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+        )
+        kb.append([InlineKeyboardButton(
+            text=f"🛍 Купить «{name}» — {fnum(price)} 💢",
+            callback_data=f"nft_buy_ask_{listing_id}"
+        )])
+
+    # Пагинация
     nav = []
-    nav.append(InlineKeyboardButton(text="▶️", callback_data=f"nftp_{min(page + 1, total_pages - 1)}"))
-    nav.append(InlineKeyboardButton(text="⏭️", callback_data=f"nftp_{total_pages - 1}"))
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"nftp_{page - 1}"))
     nav.append(InlineKeyboardButton(text=f"📂 {page + 1}/{total_pages}", callback_data="noop"))
-    nav.append(InlineKeyboardButton(text="⏮️", callback_data="nftp_0"))
-    nav.append(InlineKeyboardButton(text="◀️", callback_data=f"nftp_{max(page - 1, 0)}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"nftp_{page + 1}"))
     kb.append(nav)
     kb.append([InlineKeyboardButton(text="⬅️ Площадка", callback_data="market_menu")])
 
@@ -457,7 +461,7 @@ async def nft_buy_ask(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Да", callback_data=f"nftb_market_{listing_id}"),
-            InlineKeyboardButton(text="❌ Нет", callback_data=f"nftv_market_{listing_id}"),
+            InlineKeyboardButton(text="❌ Нет", callback_data="nftp_0"),
         ],
     ])
     await safe_edit(call.message, text, reply_markup=kb)
